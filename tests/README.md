@@ -33,6 +33,20 @@ Run the parser unit test:
 ```
 
 The parser test currently covers INSERT parsing and `SELECT * FROM <table>` parsing only.
+
+Build the executor unit test:
+
+```sh
+cc -std=c11 -Wall -Wextra -pedantic -I. tests/test_executor.c executor.c schema_manager.c storage.c -o tests/test_executor
+```
+
+Run the executor unit test:
+
+```sh
+./tests/test_executor
+```
+
+The executor test covers minimal INSERT/SELECT execution flow only.
 Build the storage unit test:
 
 ```sh
