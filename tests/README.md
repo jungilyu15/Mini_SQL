@@ -1,12 +1,24 @@
-# Stage 0 Smoke Tests
+# Tests
 
-Run the build:
+Build the app:
 
 ```sh
 cc -std=c11 -Wall -Wextra -pedantic main.c parser.c executor.c schema_manager.c storage.c -o mini_sql
 ```
 
-Smoke scenarios:
+Build the schema manager unit test:
+
+```sh
+cc -std=c11 -Wall -Wextra -pedantic -I. tests/test_schema_manager.c schema_manager.c -o tests/test_schema_manager
+```
+
+Run the schema manager unit test:
+
+```sh
+./tests/test_schema_manager
+```
+
+Current smoke scenarios for the app:
 
 ```sh
 ./mini_sql
