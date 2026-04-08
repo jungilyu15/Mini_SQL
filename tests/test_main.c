@@ -4,12 +4,12 @@
 #include <unistd.h>
 
 /*
- * main.c 안의 static helper까지 함께 검증하기 위해
- * 테스트 번역 단위 안에서 main.c를 직접 포함한다.
+ * src/main.c 안의 static helper까지 함께 검증하기 위해
+ * 테스트 번역 단위 안에서 구현 파일을 직접 포함한다.
  * 실제 프로그램의 main 심볼과 충돌하지 않도록 이름만 바꿔 둔다.
  */
 #define main mini_sql_program_main
-#include "../main.c"
+#include "../src/main.c"
 #undef main
 
 /* 각 테스트 함수를 공통 형식으로 실행한다. */
