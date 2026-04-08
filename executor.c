@@ -1,5 +1,6 @@
 #include "executor.h"
 
+#include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -185,33 +186,104 @@ static int execute_select_command(
     size_t error_buf_size
 )
 {
+    TableSchema full_schema;
+    StorageRowList full_rows;
+    size_t i = 0;
+    size_t row_index = 0;
+    size_t selected_indexes[MAX_COLUMNS];
+
     if (command == NULL || out_result == NULL)
     {
         set_error(error_buf, error_buf_size, "executor: SELECT 실행 인자가 올바르지 않습니다");
         return -1;
     }
 
-    if (!command->select_all)
-    {
-        set_error(error_buf, error_buf_size, "executor: 현재는 SELECT * 만 지원합니다");
-        return -1;
-    }
+    memset(&full_schema, 0, sizeof(full_schema));
+    full_rows.row_count = 0;
+    full_rows.rows = NULL;
 
-    if (load_schema(command->table_name, &out_result->schema, error_buf, error_buf_size) != 0)
+    if (load_schema(command->table_name, &full_schema, error_buf, error_buf_size) != 0)
     {
         return -1;
     }
 
     if (read_all_rows(
             command->table_name,
-            &out_result->schema,
-            &out_result->rows,
+            &full_schema,
+            &full_rows,
             error_buf,
             error_buf_size) != 0)
     {
         return -1;
     }
 
+    if (command->select_all)
+    {
+        out_result->schema = full_schema;
+        out_result->rows = full_rows;
+        out_result->has_rows = true;
+        return 0;
+    }
+
+    memset(&out_result->schema, 0, sizeof(out_result->schema));
+    snprintf(out_result->schema.table_name, sizeof(out_result->schema.table_name), "%s", full_schema.table_name);
+    out_result->schema.column_count = command->column_count;
+
+    for (i = 0; i < command->column_count; i++)
+    {
+        size_t schema_index = 0;
+        int found = 0;
+
+        for (schema_index = 0; schema_index < full_schema.column_count; schema_index++)
+        {
+            if (strcmp(command->columns[i], full_schema.columns[schema_index].name) == 0)
+            {
+                out_result->schema.columns[i] = full_schema.columns[schema_index];
+                selected_indexes[i] = schema_index;
+                found = 1;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            set_errorf(
+                error_buf,
+                error_buf_size,
+                "executor: 존재하지 않는 컬럼 '%s'입니다",
+                command->columns[i]
+            );
+            free_storage_row_list(&full_rows);
+            return -1;
+        }
+    }
+
+    out_result->rows.row_count = full_rows.row_count;
+    out_result->rows.rows = NULL;
+
+    if (full_rows.row_count > 0)
+    {
+        out_result->rows.rows = (StorageRow *)calloc(full_rows.row_count, sizeof(StorageRow));
+        if (out_result->rows.rows == NULL)
+        {
+            free_storage_row_list(&full_rows);
+            set_error(error_buf, error_buf_size, "executor: SELECT 결과 row 버퍼를 할당할 수 없습니다");
+            return -1;
+        }
+    }
+
+    for (row_index = 0; row_index < full_rows.row_count; row_index++)
+    {
+        out_result->rows.rows[row_index].value_count = command->column_count;
+
+        for (i = 0; i < command->column_count; i++)
+        {
+            out_result->rows.rows[row_index].values[i] =
+                full_rows.rows[row_index].values[selected_indexes[i]];
+        }
+    }
+
+    free_storage_row_list(&full_rows);
     out_result->has_rows = true;
     return 0;
 }

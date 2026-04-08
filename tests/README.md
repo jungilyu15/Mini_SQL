@@ -32,7 +32,7 @@ Run the parser unit test:
 ./tests/test_parser
 ```
 
-The parser test currently covers INSERT parsing and `SELECT * FROM <table>` parsing only.
+The parser test currently covers INSERT parsing, `SELECT * FROM <table>`, and explicit column SELECT parsing.
 
 Build the executor unit test:
 
@@ -86,6 +86,7 @@ cleans up the CSV files it creates during the run.
 - 빈 문장 무시
 - `INSERT` 문 실행 후 CSV 파일 생성 또는 append
 - `SELECT *` 실행 후 표 형태 출력
+- 특정 컬럼 SELECT 실행 후 요청한 컬럼만 출력
 - parse 실패 시 몇 번째 문장에서 실패했는지 보고
 - execute 실패 시 몇 번째 문장에서 실패했는지 보고
 
@@ -98,7 +99,8 @@ cleans up the CSV files it creates during the run.
 - int 컬럼에 숫자가 아닌 값이 들어온 경우
 - CSV 필드 수 불일치
 - `MAX_LINE_LENGTH`를 넘는 CSV 줄 읽기 오류
-- 현재 단계에서 미지원인 `SELECT name FROM ...`, `WHERE` 절 거부
+- 존재하지 않는 컬럼을 조회하면 execute 단계에서 오류 처리
+- `WHERE` 절 거부
 
 Current smoke scenarios for the app:
 

@@ -142,8 +142,8 @@ static int test_insert_command_shape(void) {
 }
 
 /*
- * SELECT *는 select_all = true, column_count = 0으로 표현하는 구조를 확인한다.
- * 지금은 실행 로직이 없더라도 command 모델 자체는 이 표현을 담을 수 있어야 한다.
+ * SELECT *는 select_all = true, column_count = 1, columns[0] = "*"로 표현한다.
+ * 실행 로직과 parser가 같은 표현을 공유할 수 있도록 구조를 맞춘다.
  */
 static int test_select_command_select_all_shape(void) {
     SelectCommand command;
@@ -151,7 +151,8 @@ static int test_select_command_select_all_shape(void) {
     memset(&command, 0, sizeof(command));
     snprintf(command.table_name, sizeof(command.table_name), "%s", "users");
     command.select_all = true;
-    command.column_count = 0;
+    command.column_count = 1;
+    snprintf(command.columns[0], sizeof(command.columns[0]), "%s", "*");
 
     if (strcmp(command.table_name, "users") != 0) {
         return 1;
@@ -159,7 +160,10 @@ static int test_select_command_select_all_shape(void) {
     if (!command.select_all) {
         return 1;
     }
-    if (command.column_count != 0) {
+    if (command.column_count != 1) {
+        return 1;
+    }
+    if (strcmp(command.columns[0], "*") != 0) {
         return 1;
     }
 

@@ -105,6 +105,22 @@ static Command make_select_all_command(const char *table_name)
     return command;
 }
 
+/* 명시적 컬럼 SELECT command를 빠르게 만드는 helper다. */
+static Command make_select_columns_command(const char *table_name, const char *c1, const char *c2)
+{
+    Command command;
+
+    memset(&command, 0, sizeof(command));
+    command.type = CMD_SELECT;
+    snprintf(command.as.select.table_name, sizeof(command.as.select.table_name), "%s", table_name);
+    command.as.select.select_all = false;
+    command.as.select.column_count = 2;
+    snprintf(command.as.select.columns[0], sizeof(command.as.select.columns[0]), "%s", c1);
+    snprintf(command.as.select.columns[1], sizeof(command.as.select.columns[1]), "%s", c2);
+
+    return command;
+}
+
 /* INSERT 실행이 schema 검증, 타입 캐스팅, storage append까지 연결되는지 확인한다. */
 static int test_execute_insert_success(void)
 {
@@ -259,19 +275,65 @@ static int test_execute_select_success(void)
     return 0;
 }
 
-/* 현재는 SELECT *만 지원하므로 select_all이 false면 실패해야 한다. */
-static int test_execute_select_rejects_non_star(void)
+/* 명시적 컬럼 SELECT면 요청한 컬럼만 projection해서 반환해야 한다. */
+static int test_execute_select_named_columns_success(void)
 {
-    Command command;
+    Command command = make_select_columns_command("executor_select", "name", "age");
     ExecutionResult result;
     char error_buf[MAX_ERROR_LENGTH];
 
-    memset(&command, 0, sizeof(command));
-    command.type = CMD_SELECT;
-    snprintf(command.as.select.table_name, sizeof(command.as.select.table_name), "%s", "executor_select");
-    command.as.select.select_all = false;
-    command.as.select.column_count = 1;
-    snprintf(command.as.select.columns[0], sizeof(command.as.select.columns[0]), "%s", "name");
+    if (execute_command(&command, &result, error_buf, sizeof(error_buf)) != 0)
+    {
+        fprintf(stderr, "%s\n", error_buf);
+        return 1;
+    }
+
+    if (!result.has_rows)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (result.schema.column_count != 2)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (strcmp(result.schema.columns[0].name, "name") != 0)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (strcmp(result.schema.columns[1].name, "age") != 0)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (result.rows.rows[0].values[0].type != COL_TEXT)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (strcmp(result.rows.rows[0].values[0].as.string_value, "Kim") != 0)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (result.rows.rows[1].values[1].as.int_value != 31)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+
+    free_execution_result(&result);
+    return 0;
+}
+
+/* 존재하지 않는 컬럼을 요청하면 명확한 오류로 실패해야 한다. */
+static int test_execute_select_missing_column(void)
+{
+    Command command = make_select_columns_command("executor_select", "name", "missing");
+    ExecutionResult result;
+    char error_buf[MAX_ERROR_LENGTH];
 
     if (execute_command(&command, &result, error_buf, sizeof(error_buf)) == 0)
     {
@@ -284,7 +346,7 @@ static int test_execute_select_rejects_non_star(void)
         return 1;
     }
 
-    return strstr(error_buf, "SELECT *") == NULL;
+    return strstr(error_buf, "존재하지 않는 컬럼") == NULL;
 }
 
 int main(void)
@@ -313,7 +375,8 @@ int main(void)
     failures += run_test("execute insert value count mismatch", test_execute_insert_value_count_mismatch);
     failures += run_test("execute insert cast failure", test_execute_insert_cast_failure);
     failures += run_test("execute select success", test_execute_select_success);
-    failures += run_test("execute select rejects non star", test_execute_select_rejects_non_star);
+    failures += run_test("execute select named columns success", test_execute_select_named_columns_success);
+    failures += run_test("execute select missing column", test_execute_select_missing_column);
 
     if (cleanup_generated_executor_files() != 0)
     {

@@ -333,7 +333,8 @@ static void print_table_border(FILE *out_stream, const size_t *widths, size_t co
 
 /*
  * SELECT 결과를 간단한 표 형태로 출력한다.
- * 현재는 SELECT *만 지원하므로 schema의 모든 컬럼을 그대로 보여준다.
+ * executor가 넘겨준 schema/rows 조합을 그대로 사용하므로
+ * SELECT *와 특정 컬럼 SELECT를 같은 출력 코드로 처리할 수 있다.
  */
 static int print_select_result(
     const ExecutionResult *result,
