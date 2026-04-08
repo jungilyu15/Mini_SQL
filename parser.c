@@ -83,6 +83,89 @@ static int parse_identifier(const char **cursor, char *out_name, size_t out_name
 }
 
 /*
+ * SELECT의 컬럼 목록 하나를 읽어 columns 배열에 추가한다.
+ * 현재 단계에서는 단순 식별자 컬럼명만 허용한다.
+ */
+static int append_select_column(
+    const char **cursor,
+    SelectCommand *out_command,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    if (out_command->column_count >= MAX_COLUMNS)
+    {
+        set_error(error_buf, error_buf_size, "parse_select: 컬럼 개수가 최대치를 초과합니다");
+        return -1;
+    }
+
+    if (!parse_identifier(
+            cursor,
+            out_command->columns[out_command->column_count],
+            sizeof(out_command->columns[out_command->column_count])))
+    {
+        set_error(error_buf, error_buf_size, "parse_select: 잘못된 컬럼 이름입니다");
+        return -1;
+    }
+
+    out_command->column_count++;
+    return 0;
+}
+
+/*
+ * SELECT 뒤의 컬럼 목록을 읽는다.
+ * "*" 또는 "name, age" 같은 단순 명시적 컬럼 목록만 지원한다.
+ */
+static int parse_select_columns(
+    const char **cursor,
+    SelectCommand *out_command,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    const char *sql = skip_spaces(*cursor);
+
+    if (*sql == '*')
+    {
+        out_command->select_all = true;
+        out_command->column_count = 1;
+        snprintf(out_command->columns[0], sizeof(out_command->columns[0]), "%s", "*");
+        *cursor = sql + 1;
+        return 0;
+    }
+
+    out_command->select_all = false;
+    out_command->column_count = 0;
+
+    while (1)
+    {
+        sql = skip_spaces(sql);
+
+        if (append_select_column(&sql, out_command, error_buf, error_buf_size) != 0)
+        {
+            return -1;
+        }
+
+        sql = skip_spaces(sql);
+        if (*sql != ',')
+        {
+            break;
+        }
+
+        sql++;
+        sql = skip_spaces(sql);
+        if (*sql == ',' || *sql == '\0')
+        {
+            set_error(error_buf, error_buf_size, "parse_select: 잘못된 컬럼 목록입니다");
+            return -1;
+        }
+    }
+
+    *cursor = sql;
+    return 0;
+}
+
+/*
  * 값 토큰 앞뒤의 공백을 제거해 복사한다.
  * 문자열 토큰은 작은따옴표까지 포함한 raw SQL token 형태를 그대로 유지한다.
  */
@@ -323,22 +406,15 @@ int parse_select(
         return -1;
     }
 
-    cursor = skip_spaces(cursor);
-    if (*cursor != '*')
+    if (parse_select_columns(&cursor, out_command, error_buf, error_buf_size) != 0)
     {
-        set_error(error_buf, error_buf_size, "parse_select: 현재는 SELECT * 만 지원합니다");
         return -1;
     }
-
-    out_command->select_all = true;
-    out_command->column_count = 1;
-    snprintf(out_command->columns[0], sizeof(out_command->columns[0]), "%s", "*");
-    cursor++;
 
     cursor = skip_spaces(cursor);
     if (!match_keyword(&cursor, "FROM"))
     {
-        set_error(error_buf, error_buf_size, "parse_select: SELECT * 뒤에는 FROM이 와야 합니다");
+        set_error(error_buf, error_buf_size, "parse_select: 컬럼 목록 뒤에는 FROM이 와야 합니다");
         return -1;
     }
 

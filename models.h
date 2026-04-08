@@ -83,11 +83,9 @@ typedef struct {
 
 typedef struct {
     /*
-     * 현재 단계에서는 SELECT *만 실제로 지원하지 않지만,
-     * 이후 특정 컬럼 SELECT로 자연스럽게 확장할 수 있도록
-     * select_all + column_count + columns[] 구조를 함께 둔다.
+     * SELECT는 "*" 또는 명시적 컬럼 목록을 담는다.
      *
-     * - SELECT *         => select_all = true,  column_count = 0
+     * - SELECT *         => select_all = true,  column_count = 1, columns[0] = "*"
      * - SELECT id, name  => select_all = false, column_count = 2
      */
     char table_name[MAX_NAME_LENGTH];

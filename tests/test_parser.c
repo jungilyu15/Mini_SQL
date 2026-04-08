@@ -259,18 +259,36 @@ static int test_parse_select_without_semicolon(void)
     return 0;
 }
 
-/* 현재 단계에서는 '*' 이외의 컬럼 목록은 지원하지 않는다. */
-static int test_parse_select_non_star_columns(void)
+/* 명시적 컬럼 목록도 순서대로 읽을 수 있어야 한다. */
+static int test_parse_select_named_columns(void)
 {
     SelectCommand command;
     char error_buf[MAX_ERROR_LENGTH];
 
-    if (parse_select("SELECT name FROM users;", &command, error_buf, sizeof(error_buf)) == 0)
+    if (parse_select("SELECT name, age FROM users;", &command, error_buf, sizeof(error_buf)) != 0)
+    {
+        fprintf(stderr, "unexpected error: %s\n", error_buf);
+        return 1;
+    }
+
+    if (command.select_all)
+    {
+        return 1;
+    }
+    if (command.column_count != 2)
+    {
+        return 1;
+    }
+    if (strcmp(command.columns[0], "name") != 0)
+    {
+        return 1;
+    }
+    if (strcmp(command.columns[1], "age") != 0)
     {
         return 1;
     }
 
-    return strstr(error_buf, "SELECT *") == NULL;
+    return 0;
 }
 
 /* FROM이 빠지면 실패해야 한다. */
@@ -299,6 +317,20 @@ static int test_parse_select_where_not_supported(void)
     }
 
     return strstr(error_buf, "추가 내용") == NULL;
+}
+
+/* 컬럼 목록에 빈 슬롯이 있으면 실패해야 한다. */
+static int test_parse_select_invalid_column_list(void)
+{
+    SelectCommand command;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    if (parse_select("SELECT name, FROM users;", &command, error_buf, sizeof(error_buf)) == 0)
+    {
+        return 1;
+    }
+
+    return strstr(error_buf, "컬럼") == NULL;
 }
 
 /* parse_sql은 현재 INSERT와 SELECT *를 둘 다 분기해 지원해야 한다. */
@@ -344,6 +376,42 @@ static int test_parse_sql_insert_and_select(void)
     return 0;
 }
 
+/* parse_sql은 명시적 컬럼 SELECT도 함께 분기해야 한다. */
+static int test_parse_sql_named_select(void)
+{
+    Command command;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    if (parse_sql("SELECT name, age FROM users;", &command, error_buf, sizeof(error_buf)) != 0)
+    {
+        fprintf(stderr, "unexpected error: %s\n", error_buf);
+        return 1;
+    }
+
+    if (command.type != CMD_SELECT)
+    {
+        return 1;
+    }
+    if (command.as.select.select_all)
+    {
+        return 1;
+    }
+    if (command.as.select.column_count != 2)
+    {
+        return 1;
+    }
+    if (strcmp(command.as.select.columns[0], "name") != 0)
+    {
+        return 1;
+    }
+    if (strcmp(command.as.select.columns[1], "age") != 0)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 int main(void)
 {
     int failures = 0;
@@ -359,10 +427,12 @@ int main(void)
     failures += run_test("parse select basic", test_parse_select_basic);
     failures += run_test("parse select case and spaces", test_parse_select_case_and_spaces);
     failures += run_test("parse select without semicolon", test_parse_select_without_semicolon);
-    failures += run_test("parse select non star columns", test_parse_select_non_star_columns);
+    failures += run_test("parse select named columns", test_parse_select_named_columns);
     failures += run_test("parse select missing from", test_parse_select_missing_from);
     failures += run_test("parse select where not supported", test_parse_select_where_not_supported);
+    failures += run_test("parse select invalid column list", test_parse_select_invalid_column_list);
     failures += run_test("parse sql insert and select", test_parse_sql_insert_and_select);
+    failures += run_test("parse sql named select", test_parse_sql_named_select);
 
     if (failures != 0)
     {
