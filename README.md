@@ -115,32 +115,57 @@ mini_sql> quit
 
 ## 4. 처리 구조
 
-```text
-입력(SQL)
-  -> TOKENIZER
-  -> 파싱(Parser)
-  -> 실행(Executor)
-  -> 저장(Storage)
+이 프로젝트의 실제 실행 흐름은 `main.c`, `parser.c`, `executor.c`, `schema_manager.c`, `storage.c`의 함수 호출 구조를 따라갑니다.
+
+```mermaid
+flowchart LR
+    A["main()"] --> B["파일 모드 또는 REPL 모드 분기"]
+    B --> C["run_statement()"]
+    C --> D["parse_sql()"]
+    D --> E["tokenize_sql()"]
+    D --> F["parse_insert_tokens() 또는 parse_select_tokens()"]
+    C --> G["execute_command()"]
+    G --> H["execute_insert_command() 또는 execute_select_command()"]
+    H --> I["load_schema()"]
+    H --> J["append_row() 또는 read_all_rows()"]
+    C --> K["print_insert_result() 또는 print_select_result()"]
 ```
 
-- 입력(SQL): SQL 파일 전체 또는 REPL 한 줄 입력을 받아 처리 시작
-- TOKENIZER: SQL 문장을 토큰 단위로 분리
-- 파싱(Parser): 토큰 목록을 바탕으로 `INSERT` / `SELECT` 구조 해석
-- 실행(Executor): 파싱 결과를 실제 동작으로 연결
-- 저장(Storage): CSV 파일 읽기/쓰기 수행
+단계별 설명:
+
+- `main()`: 프로그램 진입점이며, 인자 개수에 따라 파일 실행 모드와 REPL 모드를 나눕니다.
+- `run_statement()`: 파일 모드와 REPL 모드가 공통으로 사용하는 단일 SQL 실행 함수입니다.
+- `parse_sql()`: SQL 문자열을 받아 어떤 명령인지 판별하고 `Command` 구조체로 변환합니다.
+- `tokenize_sql()`: SQL 문자열을 token 단위로 분리합니다.
+- `parse_insert_tokens()`, `parse_select_tokens()`: token 목록을 실제 `INSERT`, `SELECT` 구조로 해석합니다.
+- `execute_command()`: 파싱 결과를 받아 실제 동작을 수행합니다.
+- `execute_insert_command()`, `execute_select_command()`: 명령 종류별 세부 실행 로직입니다.
+- `load_schema()`: `schema/<table>.schema`를 읽어 컬럼 구조를 로드합니다.
+- `append_row()`, `read_all_rows()`: CSV 데이터 파일에 row를 추가하거나 전체 row를 읽습니다.
+- `print_insert_result()`, `print_select_result()`: 실행 결과를 콘솔에 출력합니다.
 
 ## 5. 파일 기반 데이터 저장 방식
 
-```text
-사용자 SQL
-  -> 테이블 이름 추출
-  -> schema/<table>.schema 읽기
-  -> data/<table>.csv 읽기/쓰기
+이 프로젝트는 DB 서버를 사용하지 않고, schema 파일과 CSV 파일을 직접 읽고 쓰는 구조입니다.
+
+```mermaid
+flowchart TD
+    A["SQL 입력"] --> B["table 이름 추출"]
+    B --> C["load_schema()"]
+    C --> D["schema/<table>.schema 읽기"]
+    B --> E["append_row() 또는 read_all_rows()"]
+    E --> F["build_data_path()로 data/<table>.csv 경로 생성"]
+    F --> G["CSV 파일 읽기 또는 쓰기"]
 ```
 
-- schema 파일에는 컬럼 이름과 타입을 저장합니다.
-- data 파일에는 실제 row 데이터를 CSV 형태로 저장합니다.
-- 각 테이블은 별도 파일로 관리합니다.
+실제 코드 기준 설명:
+
+- schema 파일 경로는 `load_schema()`에서 `schema/<table>.schema` 형태로 만듭니다.
+- `load_schema()`는 내부에서 `trim_in_place()`, `count_char()`, `parse_column_type()` 등을 사용해 schema 줄을 해석합니다.
+- 데이터 파일 경로는 `build_data_path()`에서 `data/<table>.csv` 형태로 만듭니다.
+- `append_row()`는 내부에서 row를 CSV 한 줄로 직렬화한 뒤 파일 끝에 append 합니다.
+- `read_all_rows()`는 CSV 파일을 한 줄씩 읽어 `StorageRowList`로 복원합니다.
+- `ensure_data_directory_exists()`로 `data/` 디렉터리 존재 여부를 먼저 확인합니다.
 
 예시:
 
@@ -163,73 +188,126 @@ age:int
 
 ### INSERT 처리 흐름
 
-```text
-INSERT SQL
--> tokenizer
--> parser가 table 이름과 values 추출
--> schema 로드
--> 값 개수 / 타입 검증
--> row 구성
--> data/<table>.csv append
--> INSERT 1 출력
+`INSERT`는 실제로 아래 함수 흐름으로 실행됩니다.
+
+```mermaid
+flowchart LR
+    A["run_statement()"] --> B["parse_sql()"]
+    B --> C["tokenize_sql()"]
+    C --> D["parse_insert_tokens()"]
+    D --> E["execute_command()"]
+    E --> F["execute_insert_command()"]
+    F --> G["load_schema()"]
+    G --> H["validate_values()"]
+    H --> I["build_storage_row_from_insert()"]
+    I --> J["cast_value()"]
+    J --> K["append_row()"]
+    K --> L["print_insert_result()"]
 ```
+
+실제 의미:
+
+- `parse_sql()`이 `INSERT` 문인지 판별합니다.
+- `parse_insert_tokens()`가 `table_name`, `values`를 추출합니다.
+- `execute_insert_command()`가 schema를 로드합니다.
+- `validate_values()`로 값 개수와 타입이 schema와 맞는지 검증합니다.
+- `build_storage_row_from_insert()`에서 저장용 row를 만듭니다.
+- `cast_value()`로 raw token을 실제 타입으로 변환합니다.
+- `append_row()`가 `data/<table>.csv`에 row를 추가합니다.
+- 마지막에 `print_insert_result()`가 `INSERT 1`을 출력합니다.
 
 ### SELECT 처리 흐름
 
-```text
-SELECT SQL
--> tokenizer
--> parser가 컬럼 목록 / table / WHERE 추출
--> schema 로드
--> data/<table>.csv 전체 읽기
--> WHERE 조건 필터링
--> 필요한 컬럼만 선택
--> 표 형태 출력
+`SELECT`는 실제로 아래 함수 흐름으로 실행됩니다.
+
+```mermaid
+flowchart LR
+    A["run_statement()"] --> B["parse_sql()"]
+    B --> C["tokenize_sql()"]
+    C --> D["parse_select_tokens()"]
+    D --> E["parse_select_columns()"]
+    E --> F["parse_select_where_clause()"]
+    F --> G["execute_command()"]
+    G --> H["execute_select_command()"]
+    H --> I["load_schema()"]
+    I --> J["read_all_rows()"]
+    J --> K["apply_select_where_filter()"]
+    K --> L["print_select_result()"]
 ```
+
+실제 의미:
+
+- `parse_sql()`이 `SELECT` 문인지 판별합니다.
+- `parse_select_tokens()`가 전체 SELECT 구조를 해석합니다.
+- `parse_select_columns()`가 `*` 또는 명시적 컬럼 목록을 해석합니다.
+- `parse_select_where_clause()`가 `WHERE <column> = <value>` 형태를 해석합니다.
+- `execute_select_command()`가 schema를 로드하고 CSV 전체 row를 읽습니다.
+- `read_all_rows()`가 `data/<table>.csv`를 `StorageRowList`로 읽어옵니다.
+- `apply_select_where_filter()`가 단일 `WHERE` 조건을 적용합니다.
+- 마지막에 `print_select_result()`가 표 형태로 결과를 출력합니다.
 
 ## 7. CLI 구현 방식
 
-이 프로젝트의 CLI는 `main.c`에서 두 가지 모드로 동작합니다.
-
 ### 파일 실행 모드
 
-```text
-프로그램 실행
--> 인자 개수 확인
--> sql-file 경로 읽기
--> 파일 전체 로드
--> 세미콜론 기준 SQL 문장 분리
--> 각 문장을 순서대로 parse -> execute
--> 결과 출력
+파일 실행 모드는 `main()`에서 인자가 1개 들어왔을 때 동작합니다.
+
+```mermaid
+flowchart LR
+    A["main(argc, argv)"] --> B["read_text_file()"]
+    B --> C["split_sql_statements()"]
+    C --> D["run_sql_file()"]
+    D --> E["run_statement() 반복 호출"]
+    E --> F["parse_sql()"]
+    F --> G["execute_command()"]
+    G --> H["결과 출력"]
 ```
 
-특징:
+실제 코드 기준 설명:
 
-- 인자가 1개일 때만 SQL 파일 실행 모드로 동작합니다.
-- 빈 문장은 건너뜁니다.
-- 여러 SQL 문장을 한 파일에 넣어 순차 실행할 수 있습니다.
-- 실패 시 몇 번째 문장에서 실패했는지 에러를 출력합니다.
+- `read_text_file()`이 SQL 파일 전체를 문자열로 읽습니다.
+- `split_sql_statements()`가 세미콜론 기준으로 SQL 문장을 분리합니다.
+- `run_sql_file()`이 분리된 문장을 순서대로 실행합니다.
+- 각 문장은 공통 함수인 `run_statement()`를 통해 처리됩니다.
+- 즉, 파일 모드도 결국 `parse_sql() -> execute_command() -> 출력` 흐름을 재사용합니다.
 
 ### REPL 모드
 
-```text
-프로그램 실행
--> 인자가 없으면 REPL 진입
--> 프롬프트 출력
--> 한 줄 입력
--> exit/quit 확인
--> parse -> execute
--> 결과 출력
--> 다음 입력 대기
+REPL 모드는 `main()`에서 인자가 없을 때 `run_repl()`로 진입합니다.
+
+```mermaid
+flowchart LR
+    A["main(argc, argv)"] --> B["run_repl()"]
+    B --> C["print_repl_help()"]
+    C --> D["print_repl_prompt()"]
+    D --> E["read_repl_line()"]
+    E --> F["run_statement()"]
+    F --> G["print_insert_result() 또는 print_select_result()"]
+    G --> D
 ```
 
-특징:
+TTY 환경에서의 입력 처리 흐름은 아래와 같습니다.
 
-- 한 줄에 SQL 한 문장만 입력받습니다.
-- 좌우 화살표 커서 이동을 지원합니다.
-- 백스페이스 편집을 지원합니다.
-- `Ctrl-D`, `exit`, `quit` 입력 시 종료합니다.
-- 오류가 나도 종료하지 않고 다음 입력을 계속 받습니다.
+```mermaid
+flowchart LR
+    A["read_repl_line()"] --> B["read_tty_repl_line()"]
+    B --> C["enable_repl_raw_mode()"]
+    C --> D["handle_repl_escape_sequence()"]
+    D --> E["insert_repl_character() / delete_repl_character_left()"]
+    E --> F["redraw_repl_input()"]
+    F --> G["disable_repl_raw_mode()"]
+```
+
+실제 코드 기준 설명:
+
+- `print_repl_help()`가 REPL 안내 문구를 출력합니다.
+- `print_repl_prompt()`가 `mini_sql>` 프롬프트를 출력합니다.
+- `read_repl_line()`이 한 줄 입력을 읽습니다.
+- TTY 환경에서는 `read_tty_repl_line()`이 raw mode로 입력을 직접 처리합니다.
+- `enable_repl_raw_mode()`와 `disable_repl_raw_mode()`가 터미널 설정을 제어합니다.
+- `handle_repl_escape_sequence()`가 좌우 화살표 입력을 처리합니다.
+- `insert_repl_character()`, `delete_repl_character_left()`, `redraw_repl_input()`로 한 줄 편집을 지원합니다.
+- 입력된 한 줄은 다시 `run_statement()`로 전달되어 파일 모드와 동일한 실행 흐름을 탑니다.
 
 ## 8. 기능 테스트
 
