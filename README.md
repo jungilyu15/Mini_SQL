@@ -1,11 +1,11 @@
 # Mini_SQL
 
 파일 기반 실행과 REPL을 함께 지원하는 아주 작은 C SQL 처리기입니다.  
-SQL 파일을 입력으로 받아 `INSERT`와 `SELECT`를 순차 실행하거나, REPL에서 한 줄씩 SQL을 입력해 실행할 수 있습니다. schema는 `schema/`, 데이터는 `data/` 아래 CSV 파일로 관리합니다.
+SQL 파일을 입력으로 받아 `INSERT`와 `SELECT`를 순차 실행하거나, REPL에서 한 줄씩 SQL을 입력해 실행할 수 있습니다. `schema`는 `schema/`, 데이터는 `data/` 아래 CSV 파일로 관리합니다.
 
 현재 목표는 학습용 MVP입니다. 데이터베이스 서버를 띄우지 않고도 SQL 흐름을 끝까지 확인할 수 있도록 단순하고 읽기 쉬운 구조를 유지합니다.
 
-## 폴더 구조
+## 1. 폴더 구조
 
 - `src/`: C 구현 파일
 - `include/`: 공개 헤더 파일
@@ -14,7 +14,7 @@ SQL 파일을 입력으로 받아 `INSERT`와 `SELECT`를 순차 실행하거나
 - `sample/`: 예제 SQL 파일
 - `tests/`: 단위 테스트와 fixture
 
-## 프로젝트 소개
+## 2. 프로젝트 소개
 
 - 구현 언어: C11
 - 실행 방식:
@@ -23,17 +23,10 @@ SQL 파일을 입력으로 받아 `INSERT`와 `SELECT`를 순차 실행하거나
 - 저장 방식:
   - schema: `schema/<table>.schema`
   - data: `data/<table>.csv`
-- 지원 범위:
-  - `INSERT INTO <table> VALUES (...);`
-  - `SELECT * FROM <table>;`
-  - `SELECT <column1>, <column2> FROM <table>;`
-  - `SELECT ... FROM <table> WHERE <column> = <value>;`
 
-## 지원 SQL
+### i) 지원 SQL - INSERT 및 정책
 
-현재 단계에서 지원하는 SQL은 아래 두 가지입니다.
-
-### INSERT
+지원 예시:
 
 ```sql
 INSERT INTO users VALUES (1, 'kim', 24);
@@ -41,12 +34,18 @@ INSERT INTO users VALUES (1, 'kim', 24);
 
 정책:
 
-- 키워드는 대소문자를 구분하지 않습니다
-- 공백은 적당히 유연하게 허용합니다
-- 마지막 세미콜론은 있어도 되고 없어도 됩니다
-- 값은 schema 순서와 동일해야 합니다
+- 키워드는 대소문자를 구분하지 않습니다.
+- 공백은 비교적 유연하게 허용합니다.
+- 세미콜론은 있어도 되고 없어도 됩니다.
+- 값 개수는 schema 컬럼 수와 정확히 일치해야 합니다.
+- 값 순서는 schema 컬럼 순서와 같아야 합니다.
+- 문자열은 작은따옴표로 감싼 형태만 지원합니다.
+- `int`, `string` 타입만 지원합니다.
+- 성공 시 `INSERT 1`을 출력합니다.
 
-### SELECT
+### ii) 지원 SQL - SELECT 및 정책
+
+지원 예시:
 
 ```sql
 SELECT * FROM users;
@@ -57,54 +56,23 @@ SELECT name, age FROM users WHERE name = 'kim';
 
 정책:
 
-- `*` 또는 명시적 컬럼 목록을 지원합니다
-- `WHERE`는 단일 조건 하나와 `=` 비교만 지원합니다
-- 결과는 콘솔에 표 형태로 출력합니다
-- `INSERT` 성공 시에는 `INSERT 1` 한 줄을 출력합니다
-- 키워드는 대소문자를 구분하지 않습니다
-- 공백은 적당히 유연하게 허용합니다
-- REPL에서도 한 줄에 한 SQL 문장만 입력할 수 있습니다
-- REPL에서는 세미콜론이 있어도 되고 없어도 됩니다
-- 터미널 REPL에서는 왼쪽/오른쪽 화살표 키로 커서를 이동할 수 있습니다
+- `SELECT *` 와 명시적 컬럼 선택을 지원합니다.
+- `WHERE` 절은 단일 조건 1개만 지원합니다.
+- `WHERE` 비교는 `=`만 지원합니다.
+- 결과는 콘솔에 표 형태로 출력합니다.
+- 키워드는 대소문자를 구분하지 않습니다.
+- 공백은 비교적 유연하게 허용합니다.
+- 세미콜론은 있어도 되고 없어도 됩니다.
 
-예시 출력:
+## 3. 실행 방법
 
-```text
-+-----+-------+-----+
-| id  | name  | age |
-+-----+-------+-----+
-| 1   | Alice | 28  |
-| 2   | Bob   | 31  |
-+-----+-------+-----+
-(2 rows)
-```
-
-## Schema 포맷
-
-schema 파일은 `schema/<table>.schema` 경로에 두고, 한 줄에 하나의 컬럼을 `column:type` 형식으로 작성합니다.
-
-예: `schema/users.schema`
-
-```text
-id:int
-name:string
-age:int
-```
-
-현재 지원 타입:
-
-- `int`
-- `string`
-
-## 실행 방법
-
-### 1. 빌드
+### 1) 빌드
 
 ```sh
 cc -std=c11 -Wall -Wextra -pedantic -Iinclude src/main.c src/tokenizer.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o mini_sql
 ```
 
-### 2. 실행
+### 2) 실행
 
 ```sh
 ./mini_sql sample/basic.sql
@@ -113,14 +81,19 @@ cc -std=c11 -Wall -Wextra -pedantic -Iinclude src/main.c src/tokenizer.c src/par
 또는
 
 ```sh
-./mini_sql
 ./mini_sql sample/insert_only.sql
 ./mini_sql sample/select_only.sql
 ./mini_sql sample/select_columns.sql
 ./mini_sql sample/select_where.sql
 ```
 
-REPL 모드 예:
+### 3) REPL 모드
+
+```sh
+./mini_sql
+```
+
+실행 예시:
 
 ```text
 $ ./mini_sql
@@ -128,7 +101,6 @@ Mini_SQL REPL
 - 한 줄에 SQL 한 문장만 입력할 수 있습니다
 - 세미콜론은 있어도 되고 없어도 됩니다
 - exit 또는 quit 를 입력하면 종료합니다
-- 왼쪽/오른쪽 화살표 키로 커서를 이동할 수 있습니다
 mini_sql> INSERT INTO users VALUES (3, 'Choi', 40)
 INSERT 1
 mini_sql> SELECT name, age FROM users WHERE id = 3
@@ -141,77 +113,174 @@ mini_sql> SELECT name, age FROM users WHERE id = 3
 mini_sql> quit
 ```
 
-## 예제
+## 4. 처리 구조
 
-### 기본 예제
-
-`sample/basic.sql`
-
-```sql
-INSERT INTO users VALUES (100, 'kim', 24);
-SELECT * FROM users;
+```text
+입력(SQL)
+  -> TOKENIZER
+  -> 파싱(Parser)
+  -> 실행(Executor)
+  -> 저장(Storage)
 ```
 
-### INSERT만 실행하는 예제
+- 입력(SQL): SQL 파일 전체 또는 REPL 한 줄 입력을 받아 처리 시작
+- TOKENIZER: SQL 문장을 토큰 단위로 분리
+- 파싱(Parser): 토큰 목록을 바탕으로 `INSERT` / `SELECT` 구조 해석
+- 실행(Executor): 파싱 결과를 실제 동작으로 연결
+- 저장(Storage): CSV 파일 읽기/쓰기 수행
 
-`sample/insert_only.sql`
+## 5. 파일 기반 데이터 저장 방식
 
-```sql
-INSERT INTO users VALUES (200, 'park', 29);
+```text
+사용자 SQL
+  -> 테이블 이름 추출
+  -> schema/<table>.schema 읽기
+  -> data/<table>.csv 읽기/쓰기
 ```
 
-### SELECT만 실행하는 예제
+- schema 파일에는 컬럼 이름과 타입을 저장합니다.
+- data 파일에는 실제 row 데이터를 CSV 형태로 저장합니다.
+- 각 테이블은 별도 파일로 관리합니다.
 
-`sample/select_only.sql`
+예시:
 
-```sql
-SELECT * FROM users;
+`schema/users.schema`
+
+```text
+id:int
+name:string
+age:int
 ```
 
-### 특정 컬럼만 조회하는 예제
+`data/users.csv`
 
-`sample/select_columns.sql`
-
-```sql
-SELECT name, age FROM users;
+```text
+1,Alice,28
+2,Bob,31
 ```
 
-### WHERE로 조건 조회하는 예제
+## 6. DB 처리 흐름
 
-`sample/select_where.sql`
+### INSERT 처리 흐름
 
-```sql
-SELECT name, age FROM users WHERE name = 'Alice';
+```text
+INSERT SQL
+-> tokenizer
+-> parser가 table 이름과 values 추출
+-> schema 로드
+-> 값 개수 / 타입 검증
+-> row 구성
+-> data/<table>.csv append
+-> INSERT 1 출력
 ```
 
-## 기능 테스트 시나리오
+### SELECT 처리 흐름
 
-아래 시나리오를 기준으로 주요 기능을 검증합니다.
+```text
+SELECT SQL
+-> tokenizer
+-> parser가 컬럼 목록 / table / WHERE 추출
+-> schema 로드
+-> data/<table>.csv 전체 읽기
+-> WHERE 조건 필터링
+-> 필요한 컬럼만 선택
+-> 표 형태 출력
+```
 
-1. 인자 없이 실행하면 REPL 모드로 진입한다.
-2. 없는 SQL 파일을 넘기면 명확한 파일 읽기 오류를 출력한다.
-3. SQL 파일 안의 여러 문장을 세미콜론 기준으로 순차 실행한다.
-4. 빈 문장은 무시하고 나머지 SQL만 실행한다.
-5. `INSERT` 실행 시 schema 로드, 값 개수 검증, 타입 캐스팅, CSV append 흐름이 연결된다.
-6. `SELECT *`, 명시적 컬럼 SELECT, 단일 WHERE SELECT 실행 시 필요한 row/컬럼만 표 형태로 출력한다.
-7. REPL에서 한 줄 SQL을 실행하고, 오류가 나도 다음 입력을 계속 받는다.
-8. parse 또는 execute 단계 실패 시 파일 모드에서는 몇 번째 문장에서 실패했는지 함께 알려준다.
+## 7. CLI 구현 방식
 
-더 자세한 테스트 빌드/실행 방법은 [tests/README.md](/Users/jinhyuk/krafton/Mini_SQL/tests/README.md)에 정리되어 있습니다.
+이 프로젝트의 CLI는 `main.c`에서 두 가지 모드로 동작합니다.
 
-## 제한 사항
+### 파일 실행 모드
 
-현재는 아래 기능을 지원하지 않습니다.
+```text
+프로그램 실행
+-> 인자 개수 확인
+-> sql-file 경로 읽기
+-> 파일 전체 로드
+-> 세미콜론 기준 SQL 문장 분리
+-> 각 문장을 순서대로 parse -> execute
+-> 결과 출력
+```
 
-- `WHERE`의 다중 조건
+특징:
+
+- 인자가 1개일 때만 SQL 파일 실행 모드로 동작합니다.
+- 빈 문장은 건너뜁니다.
+- 여러 SQL 문장을 한 파일에 넣어 순차 실행할 수 있습니다.
+- 실패 시 몇 번째 문장에서 실패했는지 에러를 출력합니다.
+
+### REPL 모드
+
+```text
+프로그램 실행
+-> 인자가 없으면 REPL 진입
+-> 프롬프트 출력
+-> 한 줄 입력
+-> exit/quit 확인
+-> parse -> execute
+-> 결과 출력
+-> 다음 입력 대기
+```
+
+특징:
+
+- 한 줄에 SQL 한 문장만 입력받습니다.
+- 좌우 화살표 커서 이동을 지원합니다.
+- 백스페이스 편집을 지원합니다.
+- `Ctrl-D`, `exit`, `quit` 입력 시 종료합니다.
+- 오류가 나도 종료하지 않고 다음 입력을 계속 받습니다.
+
+## 8. 기능 테스트
+
+주요 기능은 `tests/` 아래 테스트 코드로 검증합니다.
+
+- `test_tokenizer`: SQL token 분리, 작은따옴표 처리, 연산자 처리
+- `test_parser`: `INSERT`, `SELECT *`, 명시적 컬럼 `SELECT`, 단일 `WHERE` 파싱
+- `test_schema_manager`: schema 로드, 값 검증, 타입 캐스팅
+- `test_storage`: CSV row 저장/읽기
+- `test_executor`: INSERT/SELECT 실행 흐름, projection, WHERE 필터링
+- `test_main`: SQL 파일 실행, 문장 분리, REPL, end-to-end CLI 동작
+
+대표 실행 예시:
+
+```sh
+./mini_sql
+./mini_sql missing.sql
+./mini_sql sample/basic.sql
+./mini_sql sample/insert_only.sql
+./mini_sql sample/select_only.sql
+./mini_sql sample/select_where.sql
+```
+
+## 9. 미구현 부분 / 제한 사항
+
+현재 구현은 과제의 최소 요구사항 중심의 MVP이며, 아래 항목은 지원하지 않습니다.
+
+- `CREATE TABLE`
 - `UPDATE`
 - `DELETE`
-- `CREATE TABLE`
 - `JOIN`
-- `AND`, `OR`, `>`, `<`, `LIKE`
-- 복잡한 SQL 일반화
-- CSV quoting / escaping
-- 문자열 내부 작은따옴표 escape
-- REPL 멀티라인 SQL
+- 다중 `WHERE` 조건
+- `AND`, `OR`
+- `>`, `<`, `>=`, `<=`, `!=`, `LIKE`
+- 다중 테이블 처리
+- 서브쿼리
+- 집계 함수
+- 정렬(`ORDER BY`)
+- 그룹화(`GROUP BY`)
+- 멀티라인 REPL SQL
+- REPL 한 줄 내 여러 SQL 문장 분리
+- `int`, `string` 외 타입
 
-또한 schema와 data 디렉터리는 미리 존재해야 하며, SQL 값 순서는 schema 컬럼 순서와 같아야 합니다.
+문자열/저장 관련 제한:
+
+- 문자열은 작은따옴표로 감싼 형태만 지원합니다.
+- 문자열 내부 escape 처리는 지원하지 않습니다.
+- CSV 저장 시 문자열 안에 쉼표, 개행, 큰따옴표를 포함할 수 없습니다.
+
+환경 가정:
+
+- `schema/` 와 `data/` 디렉터리는 미리 존재해야 합니다.
+- 사용할 테이블의 schema 파일은 이미 존재한다고 가정합니다.
+- 즉, 현재 프로젝트는 `schema` 와 `table` 이 이미 준비된 상태에서 `INSERT`, `SELECT` 를 수행하는 SQL 처리기입니다.
