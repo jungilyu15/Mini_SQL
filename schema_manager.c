@@ -2,7 +2,9 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -66,6 +68,10 @@ static int count_char(const char *text, char target) {
  * 현재는 요구사항에 맞춰 int, string 두 타입만 지원한다.
  */
 static int parse_column_type(const char *type_name, ColumnType *out_type) {
+    if (type_name == NULL || out_type == NULL) {
+        return -1;
+    }
+
     if (strcmp(type_name, "int") == 0) {
         *out_type = COL_INT;
         return 0;
@@ -77,6 +83,106 @@ static int parse_column_type(const char *type_name, ColumnType *out_type) {
     }
 
     return -1;
+}
+
+/*
+ * 정수 raw token을 엄격하게 검사하면서 int로 변환한다.
+ * 부호가 붙은 10진 정수는 허용하지만, 숫자 이외 문자가 섞이면 실패시킨다.
+ */
+static int parse_int_token(
+    const char *raw_value,
+    int *out_value,
+    char *error_buf,
+    size_t error_buf_size
+) {
+    char *end_ptr = NULL;
+    long parsed = 0;
+
+    if (raw_value == NULL || out_value == NULL || raw_value[0] == '\0') {
+        set_error(error_buf, error_buf_size, "cast_value: 비어 있는 int 값을 변환할 수 없습니다");
+        return -1;
+    }
+
+    errno = 0;
+    parsed = strtol(raw_value, &end_ptr, 10);
+    if (errno != 0 || end_ptr == raw_value || *end_ptr != '\0') {
+        snprintf(
+            error_buf,
+            error_buf_size,
+            "cast_value: '%s'은(는) 유효한 int raw token이 아닙니다",
+            raw_value
+        );
+        return -1;
+    }
+
+    if (parsed < INT_MIN || parsed > INT_MAX) {
+        snprintf(
+            error_buf,
+            error_buf_size,
+            "cast_value: '%s'은(는) int 범위를 벗어납니다",
+            raw_value
+        );
+        return -1;
+    }
+
+    *out_value = (int)parsed;
+    return 0;
+}
+
+/*
+ * string raw token은 SQL 토큰 기준으로 작은따옴표를 포함한 형태만 받는다.
+ * 예: 'Alice'
+ *
+ * 이번 단계에서는 escape 처리와 내부 따옴표 해석을 지원하지 않으므로,
+ * 바깥 따옴표를 제외한 본문 안에 작은따옴표가 다시 나오면 오류로 본다.
+ */
+static int parse_string_token(
+    const char *raw_value,
+    char *out_string,
+    size_t out_string_size,
+    char *error_buf,
+    size_t error_buf_size
+) {
+    size_t raw_length = 0;
+    size_t content_length = 0;
+    size_t i = 0;
+
+    if (raw_value == NULL || out_string == NULL || out_string_size == 0) {
+        set_error(error_buf, error_buf_size, "cast_value: 잘못된 string 변환 인자입니다");
+        return -1;
+    }
+
+    raw_length = strlen(raw_value);
+    if (raw_length < 2 || raw_value[0] != '\'' || raw_value[raw_length - 1] != '\'') {
+        snprintf(
+            error_buf,
+            error_buf_size,
+            "cast_value: string 값 '%s'은(는) 작은따옴표로 감싸져 있어야 합니다",
+            raw_value
+        );
+        return -1;
+    }
+
+    content_length = raw_length - 2;
+    if (content_length >= out_string_size) {
+        set_error(error_buf, error_buf_size, "cast_value: string 값 길이가 너무 깁니다");
+        return -1;
+    }
+
+    for (i = 1; i < raw_length - 1; i++) {
+        if (raw_value[i] == '\'') {
+            set_error(
+                error_buf,
+                error_buf_size,
+                "cast_value: 내부 작은따옴표나 escape string은 아직 지원하지 않습니다"
+            );
+            return -1;
+        }
+    }
+
+    memcpy(out_string, raw_value + 1, content_length);
+    out_string[content_length] = '\0';
+    return 0;
 }
 
 int load_schema(
@@ -267,4 +373,86 @@ int load_schema(
 
     /* 여기까지 왔으면 schema가 정상적으로 로드된 것이다. */
     return 0;
+}
+
+int validate_values(
+    const TableSchema *schema,
+    const SqlValue *values,
+    size_t value_count,
+    char *error_buf,
+    size_t error_buf_size
+) {
+    (void)values;
+
+    /*
+     * 이번 단계의 validate_values는 "개수 검증"만 맡는다.
+     * values 자체의 개별 타입 해석은 아직 cast_value 호출 측 책임으로 둔다.
+     */
+    if (schema == NULL) {
+        set_error(error_buf, error_buf_size, "validate_values: schema가 NULL입니다");
+        return -1;
+    }
+
+    if (schema->column_count > 0 && values == NULL) {
+        set_error(error_buf, error_buf_size, "validate_values: values가 NULL입니다");
+        return -1;
+    }
+
+    if (schema->column_count != value_count) {
+        snprintf(
+            error_buf,
+            error_buf_size,
+            "validate_values: schema column 수(%zu)와 입력 value 수(%zu)가 다릅니다",
+            schema->column_count,
+            value_count
+        );
+        return -1;
+    }
+
+    return 0;
+}
+
+int cast_value(
+    const char *type_name,
+    const char *raw_value,
+    StorageValue *out_value,
+    char *error_buf,
+    size_t error_buf_size
+) {
+    ColumnType parsed_type;
+
+    if (type_name == NULL || raw_value == NULL || out_value == NULL) {
+        set_error(error_buf, error_buf_size, "cast_value: 잘못된 인자입니다");
+        return -1;
+    }
+
+    /*
+     * 반환 구조체를 먼저 0으로 초기화해 두면
+     * 중간 실패 시에도 쓰레기 값이 남지 않는다.
+     */
+    memset(out_value, 0, sizeof(*out_value));
+
+    if (parse_column_type(type_name, &parsed_type) != 0) {
+        snprintf(
+            error_buf,
+            error_buf_size,
+            "cast_value: 지원하지 않는 타입 '%s'입니다",
+            type_name
+        );
+        return -1;
+    }
+
+    out_value->type = parsed_type;
+
+    if (parsed_type == COL_INT) {
+        return parse_int_token(raw_value, &out_value->as.int_value, error_buf, error_buf_size);
+    }
+
+    return parse_string_token(
+        raw_value,
+        out_value->as.string_value,
+        sizeof(out_value->as.string_value),
+        error_buf,
+        error_buf_size
+    );
 }

@@ -72,14 +72,28 @@ typedef struct {
 } StorageRowList;
 
 typedef struct {
+    /*
+     * INSERT는 개념적으로 table_name, values를 가진다.
+     * C에서는 동적 list 대신 고정 배열과 value_count 조합으로 표현한다.
+     */
     char table_name[MAX_NAME_LENGTH];
     size_t value_count;
     SqlValue values[MAX_COLUMNS];
 } InsertCommand;
 
 typedef struct {
+    /*
+     * 현재 단계에서는 SELECT *만 실제로 지원하지 않지만,
+     * 이후 특정 컬럼 SELECT로 자연스럽게 확장할 수 있도록
+     * select_all + column_count + columns[] 구조를 함께 둔다.
+     *
+     * - SELECT *         => select_all = true,  column_count = 0
+     * - SELECT id, name  => select_all = false, column_count = 2
+     */
     char table_name[MAX_NAME_LENGTH];
     bool select_all;
+    size_t column_count;
+    char columns[MAX_COLUMNS][MAX_NAME_LENGTH];
 } SelectCommand;
 
 typedef struct {
