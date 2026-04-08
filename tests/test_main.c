@@ -248,6 +248,25 @@ static int test_split_sql_statements_ignores_empty_and_keeps_quote_semicolon(voi
     return 0;
 }
 
+/* 작은따옴표가 닫히지 않으면 문장 분리 단계에서 즉시 실패해야 한다. */
+static int test_split_sql_statements_unterminated_quote(void)
+{
+    SqlStatementList list;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    if (split_sql_statements(
+            "INSERT INTO main_cli VALUES (1, 'kim; SELECT * FROM main_cli;",
+            &list,
+            error_buf,
+            sizeof(error_buf)) == 0)
+    {
+        free_sql_statement_list(&list);
+        return 1;
+    }
+
+    return strstr(error_buf, "작은따옴표") == NULL;
+}
+
 /* 인자가 없으면 사용법을 출력하고 non-zero로 종료해야 한다. */
 static int test_main_usage_without_argument(void)
 {
@@ -355,6 +374,48 @@ static int test_main_runs_basic_sql_file(void)
     return 0;
 }
 
+/* 기존 CSV fixture만 읽는 SELECT-only 파일도 표 형태로 정상 출력해야 한다. */
+static int test_main_runs_select_only_file(void)
+{
+    char stdout_buffer[4096];
+    char stderr_buffer[1024];
+    char *argv[] = {(char *)"mini_sql", (char *)"sql/main_select_only.sql"};
+    int exit_code = 0;
+
+    exit_code = run_main_and_capture(
+        2,
+        argv,
+        stdout_buffer,
+        sizeof(stdout_buffer),
+        stderr_buffer,
+        sizeof(stderr_buffer));
+
+    if (exit_code != 0)
+    {
+        fprintf(stderr, "%s\n", stderr_buffer);
+        return 1;
+    }
+
+    if (strstr(stdout_buffer, "+") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "| id") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "Han") == NULL || strstr(stdout_buffer, "Yoon") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "(2 rows)") == NULL)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 /* 파일 안의 빈 문장들은 무시하고 나머지 SQL만 순서대로 실행해야 한다. */
 static int test_main_ignores_empty_statements(void)
 {
@@ -406,6 +467,74 @@ static int test_main_ignores_empty_statements(void)
     return 0;
 }
 
+/* parse 단계 실패 시 몇 번째 문장에서 실패했는지 오류에 포함해야 한다. */
+static int test_main_reports_parse_statement_index(void)
+{
+    char stdout_buffer[1024];
+    char stderr_buffer[1024];
+    char *argv[] = {(char *)"mini_sql", (char *)"sql/main_parse_error.sql"};
+    int exit_code = 0;
+
+    exit_code = run_main_and_capture(
+        2,
+        argv,
+        stdout_buffer,
+        sizeof(stdout_buffer),
+        stderr_buffer,
+        sizeof(stderr_buffer));
+
+    if (exit_code == 0)
+    {
+        return 1;
+    }
+
+    if (strstr(stderr_buffer, "statement 2 parse failed") == NULL)
+    {
+        return 1;
+    }
+
+    return strstr(stderr_buffer, "SELECT *") == NULL;
+}
+
+/* execute 단계 실패 시 몇 번째 문장에서 실패했는지 오류에 포함해야 한다. */
+static int test_main_reports_execute_statement_index(void)
+{
+    char stdout_buffer[1024];
+    char stderr_buffer[1024];
+    char *argv[] = {(char *)"mini_sql", (char *)"sql/main_execute_error.sql"};
+    int exit_code = 0;
+
+    if (remove_if_exists("data/main_cli.csv") != 0)
+    {
+        return 1;
+    }
+
+    exit_code = run_main_and_capture(
+        2,
+        argv,
+        stdout_buffer,
+        sizeof(stdout_buffer),
+        stderr_buffer,
+        sizeof(stderr_buffer));
+
+    if (exit_code == 0)
+    {
+        return 1;
+    }
+
+    if (strstr(stderr_buffer, "statement 2 execute failed") == NULL)
+    {
+        return 1;
+    }
+
+    if (remove_if_exists("data/main_cli.csv") != 0)
+    {
+        return 1;
+    }
+
+    return strstr(stderr_buffer, "int") == NULL;
+}
+
 int main(void)
 {
     char original_cwd[1024];
@@ -432,10 +561,16 @@ int main(void)
     failures += run_test(
         "split sql statements ignores empty and keeps quote semicolon",
         test_split_sql_statements_ignores_empty_and_keeps_quote_semicolon);
+    failures += run_test(
+        "split sql statements unterminated quote",
+        test_split_sql_statements_unterminated_quote);
     failures += run_test("main usage without argument", test_main_usage_without_argument);
     failures += run_test("main missing sql file", test_main_missing_sql_file);
     failures += run_test("main runs basic sql file", test_main_runs_basic_sql_file);
+    failures += run_test("main runs select only file", test_main_runs_select_only_file);
     failures += run_test("main ignores empty statements", test_main_ignores_empty_statements);
+    failures += run_test("main reports parse statement index", test_main_reports_parse_statement_index);
+    failures += run_test("main reports execute statement index", test_main_reports_execute_statement_index);
 
     if (cleanup_generated_main_files() != 0)
     {
