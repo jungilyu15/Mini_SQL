@@ -12,6 +12,7 @@
                 "-pedantic",
                 "-Iinclude",
                 "src/main.c",
+                "src/tokenizer.c",
                 "src/parser.c",
                 "src/executor.c",
                 "src/schema_manager.c",

@@ -7,6 +7,7 @@
 
 /*
  * INSERT 문 하나를 파싱해 InsertCommand를 채운다.
+ * tokenizer가 만든 token 목록을 parser가 해석하는 구조를 따른다.
  *
  * 지원 예:
  *   INSERT INTO users VALUES (1, 'kim', 24);
@@ -26,6 +27,7 @@ int parse_insert(
 
 /*
  * SELECT 문 하나를 파싱해 SelectCommand를 채운다.
+ * tokenizer가 token화한 결과를 바탕으로 문법 구조만 해석한다.
  *
  * 지원 예:
  *   SELECT * FROM users;
@@ -50,6 +52,7 @@ int parse_select(
 /*
  * 현재 단계의 parse_sql은 INSERT와 SELECT를 지원한다.
  * SELECT는 "*" 또는 명시적 컬럼 목록만 허용한다.
+ * 내부적으로는 tokenizer -> parser 해석 순서를 따른다.
  */
 int parse_sql(
     const char *sql,

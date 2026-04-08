@@ -101,7 +101,7 @@ age:int
 ### 1. 빌드
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic -Iinclude src/main.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o mini_sql
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude src/main.c src/tokenizer.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o mini_sql
 ```
 
 ### 2. 실행

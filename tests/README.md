@@ -3,8 +3,23 @@
 Build the app:
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic -Iinclude src/main.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o mini_sql
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude src/main.c src/tokenizer.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o mini_sql
 ```
+
+Build the tokenizer unit test:
+
+```sh
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_tokenizer.c src/tokenizer.c -o tests/test_tokenizer
+```
+
+Run the tokenizer unit test:
+
+```sh
+./tests/test_tokenizer
+```
+
+The tokenizer test covers SQL token splitting, quote handling, operator tokenization,
+and unsupported character errors.
 
 Build the schema manager unit test:
 
@@ -23,7 +38,7 @@ The schema manager test covers schema loading, command model shape checks,
 Build the parser unit test:
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_parser.c src/parser.c -o tests/test_parser
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_parser.c src/parser.c src/tokenizer.c -o tests/test_parser
 ```
 
 Run the parser unit test:
@@ -53,7 +68,7 @@ and single-condition SELECT WHERE filtering.
 Build the main CLI integration test:
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_main.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o tests/test_main
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_main.c src/tokenizer.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o tests/test_main
 ```
 
 Run the main CLI integration test:
