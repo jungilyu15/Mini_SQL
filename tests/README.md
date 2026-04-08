@@ -18,6 +18,9 @@ Run the schema manager unit test:
 ./tests/test_schema_manager
 ```
 
+The schema manager test covers schema loading, command model shape checks,
+`validate_values`, and `cast_value`.
+
 Build the storage unit test:
 
 ```sh
