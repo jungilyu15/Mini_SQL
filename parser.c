@@ -218,7 +218,12 @@ static int parse_values(
  * 마지막 세미콜론은 선택적으로 허용한다.
  * 대신 세미콜론 뒤에 다른 문장이 이어지는 것은 아직 지원하지 않는다.
  */
-static int expect_end_or_semicolon(const char *cursor, char *error_buf, size_t error_buf_size)
+static int expect_end_or_semicolon(
+    const char *cursor,
+    const char *context_name,
+    char *error_buf,
+    size_t error_buf_size
+)
 {
     cursor = skip_spaces(cursor);
 
@@ -229,7 +234,12 @@ static int expect_end_or_semicolon(const char *cursor, char *error_buf, size_t e
 
     if (*cursor != '\0')
     {
-        set_error(error_buf, error_buf_size, "parse_insert: INSERT 뒤에 지원하지 않는 추가 내용이 있습니다");
+        snprintf(
+            error_buf,
+            error_buf_size,
+            "%s: 문장 뒤에 지원하지 않는 추가 내용이 있습니다",
+            context_name
+        );
         return -1;
     }
 
@@ -286,7 +296,60 @@ int parse_insert(
         return -1;
     }
 
-    return expect_end_or_semicolon(cursor, error_buf, error_buf_size);
+    return expect_end_or_semicolon(cursor, "parse_insert", error_buf, error_buf_size);
+}
+
+int parse_select(
+    const char *sql,
+    SelectCommand *out_command,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    const char *cursor = NULL;
+
+    if (sql == NULL || out_command == NULL)
+    {
+        set_error(error_buf, error_buf_size, "parse_select: 잘못된 인자입니다");
+        return -1;
+    }
+
+    memset(out_command, 0, sizeof(*out_command));
+    cursor = skip_spaces(sql);
+
+    if (!match_keyword(&cursor, "SELECT"))
+    {
+        set_error(error_buf, error_buf_size, "parse_select: SELECT 문이 아닙니다");
+        return -1;
+    }
+
+    cursor = skip_spaces(cursor);
+    if (*cursor != '*')
+    {
+        set_error(error_buf, error_buf_size, "parse_select: 현재는 SELECT * 만 지원합니다");
+        return -1;
+    }
+
+    out_command->select_all = true;
+    out_command->column_count = 1;
+    snprintf(out_command->columns[0], sizeof(out_command->columns[0]), "%s", "*");
+    cursor++;
+
+    cursor = skip_spaces(cursor);
+    if (!match_keyword(&cursor, "FROM"))
+    {
+        set_error(error_buf, error_buf_size, "parse_select: SELECT * 뒤에는 FROM이 와야 합니다");
+        return -1;
+    }
+
+    cursor = skip_spaces(cursor);
+    if (!parse_identifier(&cursor, out_command->table_name, sizeof(out_command->table_name)))
+    {
+        set_error(error_buf, error_buf_size, "parse_select: FROM 뒤에 테이블 이름이 필요합니다");
+        return -1;
+    }
+
+    return expect_end_or_semicolon(cursor, "parse_select", error_buf, error_buf_size);
 }
 
 int parse_sql(
@@ -298,6 +361,7 @@ int parse_sql(
 {
     const char *cursor = NULL;
     InsertCommand insert_command;
+    SelectCommand select_command;
 
     if (sql == NULL || out_command == NULL)
     {
@@ -322,8 +386,14 @@ int parse_sql(
 
     if (match_keyword(&cursor, "SELECT"))
     {
-        set_error(error_buf, error_buf_size, "parse_sql: SELECT는 아직 구현되지 않았습니다");
-        return -1;
+        if (parse_select(sql, &select_command, error_buf, error_buf_size) != 0)
+        {
+            return -1;
+        }
+
+        out_command->type = CMD_SELECT;
+        out_command->as.select = select_command;
+        return 0;
     }
 
     set_error(error_buf, error_buf_size, "parse_sql: 지원하지 않는 SQL 문입니다");
