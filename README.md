@@ -60,6 +60,7 @@ SELECT name, age FROM users WHERE name = 'kim';
 - `*` 또는 명시적 컬럼 목록을 지원합니다
 - `WHERE`는 단일 조건 하나와 `=` 비교만 지원합니다
 - 결과는 콘솔에 표 형태로 출력합니다
+- `INSERT` 성공 시에는 `INSERT 1` 한 줄을 출력합니다
 - 키워드는 대소문자를 구분하지 않습니다
 - 공백은 적당히 유연하게 허용합니다
 - REPL에서도 한 줄에 한 SQL 문장만 입력할 수 있습니다
@@ -127,6 +128,7 @@ Mini_SQL REPL
 - 세미콜론은 있어도 되고 없어도 됩니다
 - exit 또는 quit 를 입력하면 종료합니다
 mini_sql> INSERT INTO users VALUES (3, 'Choi', 40)
+INSERT 1
 mini_sql> SELECT name, age FROM users WHERE id = 3
 +------+-----+
 | name | age |

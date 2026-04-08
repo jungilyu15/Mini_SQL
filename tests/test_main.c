@@ -450,6 +450,10 @@ static int test_main_runs_basic_sql_file(void)
         return 1;
     }
 
+    if (strstr(stdout_buffer, "INSERT 1") == NULL)
+    {
+        return 1;
+    }
     if (strstr(stdout_buffer, "| id |") == NULL)
     {
         return 1;
@@ -683,6 +687,10 @@ static int test_main_repl_runs_insert_and_select_sequence(void)
     }
 
     if (strstr(stdout_buffer, "Mini_SQL REPL") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "INSERT 1") == NULL)
     {
         return 1;
     }
