@@ -462,6 +462,18 @@ static int print_select_result(
 }
 
 /*
+ * INSERT 성공 결과를 간단한 한 줄 요약으로 출력한다.
+ *
+ * 현재 MVP에서는 INSERT 한 문장이 항상 row 하나만 추가하므로
+ * PostgreSQL류의 짧은 성공 메시지처럼 `INSERT 1`을 출력한다.
+ * 이렇게 하면 SELECT처럼 표가 없는 명령도 사용자가 성공 여부를 즉시 알 수 있다.
+ */
+static void print_insert_result(FILE *out_stream)
+{
+    fprintf(out_stream, "INSERT 1\n");
+}
+
+/*
  * SQL 문장 하나를 실행한다.
  * 파일 모드와 REPL 모드가 모두 같은 parse -> execute -> 출력 흐름을 재사용할 수 있도록 분리한다.
  */
@@ -506,6 +518,10 @@ static int run_statement(
             free_execution_result(&result);
             return -1;
         }
+    }
+    else
+    {
+        print_insert_result(out_stream);
     }
 
     free_execution_result(&result);

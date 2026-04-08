@@ -89,6 +89,7 @@ cleans up the CSV files it creates during the run.
 - 빈 문장 무시
 - `INSERT` 문 실행 후 CSV 파일 생성 또는 append
 - `SELECT *` 실행 후 표 형태 출력
+- `INSERT` 실행 후 `INSERT 1` 성공 메시지 출력
 - 특정 컬럼 SELECT 실행 후 요청한 컬럼만 출력
 - 단일 WHERE SELECT 실행 후 조건에 맞는 row만 출력
 - REPL에서 세미콜론 없는 한 줄 SQL 실행
@@ -125,4 +126,5 @@ Expected current behavior:
 - no-argument run enters REPL and exits 0 on EOF or quit/exit
 - missing sql-file path prints a clear file read error and exits non-zero
 - valid sql-file input is split into statements and executed in order
+- INSERT 성공 시 `INSERT 1` 한 줄이 출력된다
 - SELECT 결과는 표 형태로 콘솔에 출력된다
