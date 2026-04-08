@@ -83,15 +83,33 @@ typedef struct {
 
 typedef struct {
     /*
+     * SELECT WHERE 절의 최소 표현이다.
+     * 이번 단계에서는 단일 조건 하나만 지원하므로
+     * 컬럼 이름과 raw SQL value token만 보관한다.
+     *
+     * 예:
+     * - WHERE id = 1      -> column = "id",   value.raw = "1"
+     * - WHERE name = 'x'  -> column = "name", value.raw = "'x'"
+     */
+    bool has_where;
+    char column[MAX_NAME_LENGTH];
+    SqlValue value;
+} SelectWhere;
+
+typedef struct {
+    /*
      * SELECT는 "*" 또는 명시적 컬럼 목록을 담는다.
      *
      * - SELECT *         => select_all = true,  column_count = 1, columns[0] = "*"
      * - SELECT id, name  => select_all = false, column_count = 2
+     *
+     * WHERE는 아직 단일 "=" 조건 하나만 지원한다.
      */
     char table_name[MAX_NAME_LENGTH];
     bool select_all;
     size_t column_count;
     char columns[MAX_COLUMNS][MAX_NAME_LENGTH];
+    SelectWhere where;
 } SelectCommand;
 
 typedef struct {

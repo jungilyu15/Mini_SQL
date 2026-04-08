@@ -69,6 +69,155 @@ static const char *column_type_name(ColumnType type)
     return NULL;
 }
 
+/* schema 안에서 특정 컬럼 이름의 위치를 찾는다. */
+static int find_schema_column_index(
+    const TableSchema *schema,
+    const char *column_name,
+    size_t *out_index
+)
+{
+    size_t i = 0;
+
+    if (schema == NULL || column_name == NULL || out_index == NULL)
+    {
+        return -1;
+    }
+
+    for (i = 0; i < schema->column_count; i++)
+    {
+        if (strcmp(schema->columns[i].name, column_name) == 0)
+        {
+            *out_index = i;
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+/*
+ * WHERE 비교는 schema 타입 기준으로 캐스팅한 결과끼리 비교한다.
+ * 현재는 int / string 두 타입만 있으므로 타입이 같을 때 단순 비교면 충분하다.
+ */
+static int storage_value_equals(const StorageValue *left, const StorageValue *right)
+{
+    if (left == NULL || right == NULL)
+    {
+        return 0;
+    }
+
+    if (left->type != right->type)
+    {
+        return 0;
+    }
+
+    if (left->type == COL_INT)
+    {
+        return left->as.int_value == right->as.int_value;
+    }
+
+    return strcmp(left->as.string_value, right->as.string_value) == 0;
+}
+
+/*
+ * SELECT WHERE 절이 있으면 row 목록을 필터링한다.
+ * WHERE가 없으면 입력 row 목록의 소유권을 그대로 출력 구조로 넘긴다.
+ */
+static int apply_select_where_filter(
+    const TableSchema *schema,
+    const SelectCommand *command,
+    StorageRowList *input_rows,
+    StorageRowList *out_rows,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    size_t where_column_index = 0;
+    const char *type_name = NULL;
+    StorageValue where_value;
+    size_t row_index = 0;
+
+    if (schema == NULL || command == NULL || input_rows == NULL || out_rows == NULL)
+    {
+        set_error(error_buf, error_buf_size, "executor: WHERE 필터링 인자가 올바르지 않습니다");
+        return -1;
+    }
+
+    out_rows->row_count = 0;
+    out_rows->rows = NULL;
+
+    if (!command->where.has_where)
+    {
+        *out_rows = *input_rows;
+        input_rows->row_count = 0;
+        input_rows->rows = NULL;
+        return 0;
+    }
+
+    if (find_schema_column_index(schema, command->where.column, &where_column_index) != 0)
+    {
+        set_errorf(
+            error_buf,
+            error_buf_size,
+            "executor: WHERE 컬럼 '%s'이(가) schema에 없습니다",
+            command->where.column
+        );
+        return -1;
+    }
+
+    type_name = column_type_name(schema->columns[where_column_index].type);
+    if (type_name == NULL)
+    {
+        set_errorf(
+            error_buf,
+            error_buf_size,
+            "executor: WHERE 컬럼 '%s'의 타입을 해석할 수 없습니다",
+            command->where.column
+        );
+        return -1;
+    }
+
+    memset(&where_value, 0, sizeof(where_value));
+    if (cast_value(
+            type_name,
+            command->where.value.raw,
+            &where_value,
+            error_buf,
+            error_buf_size) != 0)
+    {
+        return -1;
+    }
+
+    if (input_rows->row_count > 0)
+    {
+        out_rows->rows = (StorageRow *)calloc(input_rows->row_count, sizeof(StorageRow));
+        if (out_rows->rows == NULL)
+        {
+            set_error(error_buf, error_buf_size, "executor: WHERE 결과 row 버퍼를 할당할 수 없습니다");
+            return -1;
+        }
+    }
+
+    for (row_index = 0; row_index < input_rows->row_count; row_index++)
+    {
+        if (storage_value_equals(
+                &input_rows->rows[row_index].values[where_column_index],
+                &where_value))
+        {
+            out_rows->rows[out_rows->row_count] = input_rows->rows[row_index];
+            out_rows->row_count++;
+        }
+    }
+
+    if (out_rows->row_count == 0)
+    {
+        free(out_rows->rows);
+        out_rows->rows = NULL;
+    }
+
+    return 0;
+}
+
 /*
  * INSERT raw token 배열을 schema 순서의 StorageRow로 변환한다.
  * 이 단계에서 각 값의 실제 타입 해석이 처음 일어난다.
@@ -177,7 +326,7 @@ static int execute_insert_command(
 
 /*
  * SELECT 실행 흐름을 담당한다.
- * 현재 단계에서는 SELECT *만 지원하므로 schema 전체를 읽고 모든 row를 반환한다.
+ * schema 전체 row를 읽은 뒤, 필요하면 WHERE 필터링과 컬럼 projection을 적용한다.
  */
 static int execute_select_command(
     const SelectCommand *command,
@@ -188,6 +337,7 @@ static int execute_select_command(
 {
     TableSchema full_schema;
     StorageRowList full_rows;
+    StorageRowList filtered_rows;
     size_t i = 0;
     size_t row_index = 0;
     size_t selected_indexes[MAX_COLUMNS];
@@ -201,6 +351,8 @@ static int execute_select_command(
     memset(&full_schema, 0, sizeof(full_schema));
     full_rows.row_count = 0;
     full_rows.rows = NULL;
+    filtered_rows.row_count = 0;
+    filtered_rows.rows = NULL;
 
     if (load_schema(command->table_name, &full_schema, error_buf, error_buf_size) != 0)
     {
@@ -217,10 +369,24 @@ static int execute_select_command(
         return -1;
     }
 
+    if (apply_select_where_filter(
+            &full_schema,
+            command,
+            &full_rows,
+            &filtered_rows,
+            error_buf,
+            error_buf_size) != 0)
+    {
+        free_storage_row_list(&full_rows);
+        return -1;
+    }
+
+    free_storage_row_list(&full_rows);
+
     if (command->select_all)
     {
         out_result->schema = full_schema;
-        out_result->rows = full_rows;
+        out_result->rows = filtered_rows;
         out_result->has_rows = true;
         return 0;
     }
@@ -231,21 +397,7 @@ static int execute_select_command(
 
     for (i = 0; i < command->column_count; i++)
     {
-        size_t schema_index = 0;
-        int found = 0;
-
-        for (schema_index = 0; schema_index < full_schema.column_count; schema_index++)
-        {
-            if (strcmp(command->columns[i], full_schema.columns[schema_index].name) == 0)
-            {
-                out_result->schema.columns[i] = full_schema.columns[schema_index];
-                selected_indexes[i] = schema_index;
-                found = 1;
-                break;
-            }
-        }
-
-        if (!found)
+        if (find_schema_column_index(&full_schema, command->columns[i], &selected_indexes[i]) != 0)
         {
             set_errorf(
                 error_buf,
@@ -253,37 +405,39 @@ static int execute_select_command(
                 "executor: 존재하지 않는 컬럼 '%s'입니다",
                 command->columns[i]
             );
-            free_storage_row_list(&full_rows);
+            free_storage_row_list(&filtered_rows);
             return -1;
         }
+
+        out_result->schema.columns[i] = full_schema.columns[selected_indexes[i]];
     }
 
-    out_result->rows.row_count = full_rows.row_count;
+    out_result->rows.row_count = filtered_rows.row_count;
     out_result->rows.rows = NULL;
 
-    if (full_rows.row_count > 0)
+    if (filtered_rows.row_count > 0)
     {
-        out_result->rows.rows = (StorageRow *)calloc(full_rows.row_count, sizeof(StorageRow));
+        out_result->rows.rows = (StorageRow *)calloc(filtered_rows.row_count, sizeof(StorageRow));
         if (out_result->rows.rows == NULL)
         {
-            free_storage_row_list(&full_rows);
+            free_storage_row_list(&filtered_rows);
             set_error(error_buf, error_buf_size, "executor: SELECT 결과 row 버퍼를 할당할 수 없습니다");
             return -1;
         }
     }
 
-    for (row_index = 0; row_index < full_rows.row_count; row_index++)
+    for (row_index = 0; row_index < filtered_rows.row_count; row_index++)
     {
         out_result->rows.rows[row_index].value_count = command->column_count;
 
         for (i = 0; i < command->column_count; i++)
         {
             out_result->rows.rows[row_index].values[i] =
-                full_rows.rows[row_index].values[selected_indexes[i]];
+                filtered_rows.rows[row_index].values[selected_indexes[i]];
         }
     }
 
-    free_storage_row_list(&full_rows);
+    free_storage_row_list(&filtered_rows);
     out_result->has_rows = true;
     return 0;
 }

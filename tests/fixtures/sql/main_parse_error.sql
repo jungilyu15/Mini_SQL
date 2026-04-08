@@ -1,2 +1,2 @@
 INSERT INTO main_cli VALUES (1, 'kim', 24);
-SELECT name FROM main_cli WHERE age = 10;
+SELECT name FROM main_cli WHERE age = 10 AND id = 1;

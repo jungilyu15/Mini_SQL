@@ -30,12 +30,15 @@ int parse_insert(
  * 지원 예:
  *   SELECT * FROM users;
  *   SELECT name, age FROM users;
+ *   SELECT * FROM users WHERE id = 1;
+ *   SELECT name, age FROM users WHERE name = 'kim';
  *
  * 정책:
  * - 키워드는 대소문자를 구분하지 않는다
  * - 공백은 적당히 유연하게 허용한다
  * - 마지막 세미콜론은 있어도 되고 없어도 된다
  * - 현재 단계에서는 "*" 또는 단순 컬럼 목록만 지원한다
+ * - WHERE는 단일 조건 하나와 "=" 비교만 지원한다
  */
 int parse_select(
     const char *sql,

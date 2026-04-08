@@ -170,10 +170,7 @@ static int test_select_command_select_all_shape(void) {
     return 0;
 }
 
-/*
- * 아직 특정 컬럼 SELECT를 실제로 지원하지는 않지만,
- * 미래 확장을 위해 columns[]와 column_count를 담을 수 있어야 한다.
- */
+/* 특정 컬럼 SELECT를 위해 columns[]와 column_count를 담을 수 있어야 한다. */
 static int test_select_command_columns_shape(void) {
     SelectCommand command;
 
@@ -194,6 +191,33 @@ static int test_select_command_columns_shape(void) {
         return 1;
     }
     if (strcmp(command.columns[1], "name") != 0) {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* SELECT WHERE 최소 표현이 column + raw value token 형태로 담기는지 확인한다. */
+static int test_select_command_where_shape(void) {
+    SelectCommand command;
+
+    memset(&command, 0, sizeof(command));
+    snprintf(command.table_name, sizeof(command.table_name), "%s", "users");
+    command.select_all = false;
+    command.column_count = 2;
+    snprintf(command.columns[0], sizeof(command.columns[0]), "%s", "name");
+    snprintf(command.columns[1], sizeof(command.columns[1]), "%s", "age");
+    command.where.has_where = true;
+    snprintf(command.where.column, sizeof(command.where.column), "%s", "name");
+    snprintf(command.where.value.raw, sizeof(command.where.value.raw), "%s", "'kim'");
+
+    if (!command.where.has_where) {
+        return 1;
+    }
+    if (strcmp(command.where.column, "name") != 0) {
+        return 1;
+    }
+    if (strcmp(command.where.value.raw, "'kim'") != 0) {
         return 1;
     }
 
@@ -377,6 +401,7 @@ int main(void) {
     failures += run_test("insert command shape", test_insert_command_shape);
     failures += run_test("select command select_all shape", test_select_command_select_all_shape);
     failures += run_test("select command columns shape", test_select_command_columns_shape);
+    failures += run_test("select command where shape", test_select_command_where_shape);
     failures += run_test("valid schema", expect_successful_users_schema);
     failures += run_test("schema with spaces", expect_successful_schema_with_spaces);
     failures += run_test("validate values success", test_validate_values_success);

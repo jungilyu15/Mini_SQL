@@ -121,6 +121,19 @@ static Command make_select_columns_command(const char *table_name, const char *c
     return command;
 }
 
+/* SELECT command에 단일 WHERE 조건을 붙이는 helper다. */
+static void set_select_where(Command *command, const char *column, const char *raw_value)
+{
+    if (command == NULL)
+    {
+        return;
+    }
+
+    command->as.select.where.has_where = true;
+    snprintf(command->as.select.where.column, sizeof(command->as.select.where.column), "%s", column);
+    snprintf(command->as.select.where.value.raw, sizeof(command->as.select.where.value.raw), "%s", raw_value);
+}
+
 /* INSERT 실행이 schema 검증, 타입 캐스팅, storage append까지 연결되는지 확인한다. */
 static int test_execute_insert_success(void)
 {
@@ -328,6 +341,96 @@ static int test_execute_select_named_columns_success(void)
     return 0;
 }
 
+/* int 컬럼 WHERE는 schema 타입으로 캐스팅한 뒤 해당 row만 남겨야 한다. */
+static int test_execute_select_where_int_success(void)
+{
+    Command command = make_select_all_command("executor_select");
+    ExecutionResult result;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    set_select_where(&command, "id", "2");
+
+    if (execute_command(&command, &result, error_buf, sizeof(error_buf)) != 0)
+    {
+        fprintf(stderr, "%s\n", error_buf);
+        return 1;
+    }
+
+    if (!result.has_rows)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (result.rows.row_count != 1)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (result.rows.rows[0].values[0].as.int_value != 2)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (strcmp(result.rows.rows[0].values[1].as.string_value, "Lee") != 0)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+
+    free_execution_result(&result);
+    return 0;
+}
+
+/* 명시적 컬럼 SELECT에도 WHERE 필터링이 먼저 적용된 뒤 projection 되어야 한다. */
+static int test_execute_select_named_columns_where_string_success(void)
+{
+    Command command = make_select_columns_command("executor_select", "name", "age");
+    ExecutionResult result;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    set_select_where(&command, "name", "'Kim'");
+
+    if (execute_command(&command, &result, error_buf, sizeof(error_buf)) != 0)
+    {
+        fprintf(stderr, "%s\n", error_buf);
+        return 1;
+    }
+
+    if (!result.has_rows)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (result.rows.row_count != 1)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (result.schema.column_count != 2)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (strcmp(result.schema.columns[0].name, "name") != 0)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (strcmp(result.rows.rows[0].values[0].as.string_value, "Kim") != 0)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+    if (result.rows.rows[0].values[1].as.int_value != 24)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+
+    free_execution_result(&result);
+    return 0;
+}
+
 /* 존재하지 않는 컬럼을 요청하면 명확한 오류로 실패해야 한다. */
 static int test_execute_select_missing_column(void)
 {
@@ -347,6 +450,29 @@ static int test_execute_select_missing_column(void)
     }
 
     return strstr(error_buf, "존재하지 않는 컬럼") == NULL;
+}
+
+/* WHERE 컬럼이 schema에 없으면 명확한 오류로 실패해야 한다. */
+static int test_execute_select_missing_where_column(void)
+{
+    Command command = make_select_all_command("executor_select");
+    ExecutionResult result;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    set_select_where(&command, "missing", "1");
+
+    if (execute_command(&command, &result, error_buf, sizeof(error_buf)) == 0)
+    {
+        free_execution_result(&result);
+        return 1;
+    }
+
+    if (result.rows.row_count != 0 || result.rows.rows != NULL)
+    {
+        return 1;
+    }
+
+    return strstr(error_buf, "WHERE 컬럼") == NULL;
 }
 
 int main(void)
@@ -376,7 +502,12 @@ int main(void)
     failures += run_test("execute insert cast failure", test_execute_insert_cast_failure);
     failures += run_test("execute select success", test_execute_select_success);
     failures += run_test("execute select named columns success", test_execute_select_named_columns_success);
+    failures += run_test("execute select where int success", test_execute_select_where_int_success);
+    failures += run_test(
+        "execute select named columns where string success",
+        test_execute_select_named_columns_where_string_success);
     failures += run_test("execute select missing column", test_execute_select_missing_column);
+    failures += run_test("execute select missing where column", test_execute_select_missing_where_column);
 
     if (cleanup_generated_executor_files() != 0)
     {

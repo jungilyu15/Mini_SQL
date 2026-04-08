@@ -16,6 +16,7 @@ SQL 파일을 입력으로 받아 `INSERT`와 `SELECT`를 순차 실행하고, s
   - `INSERT INTO <table> VALUES (...);`
   - `SELECT * FROM <table>;`
   - `SELECT <column1>, <column2> FROM <table>;`
+  - `SELECT ... FROM <table> WHERE <column> = <value>;`
 
 ## 지원 SQL
 
@@ -39,11 +40,14 @@ INSERT INTO users VALUES (1, 'kim', 24);
 ```sql
 SELECT * FROM users;
 SELECT name, age FROM users;
+SELECT * FROM users WHERE id = 1;
+SELECT name, age FROM users WHERE name = 'kim';
 ```
 
 정책:
 
 - `*` 또는 명시적 컬럼 목록을 지원합니다
+- `WHERE`는 단일 조건 하나와 `=` 비교만 지원합니다
 - 결과는 콘솔에 표 형태로 출력합니다
 - 키워드는 대소문자를 구분하지 않습니다
 - 공백은 적당히 유연하게 허용합니다
@@ -97,6 +101,7 @@ cc -std=c11 -Wall -Wextra -pedantic main.c parser.c executor.c schema_manager.c 
 ./mini_sql sample/insert_only.sql
 ./mini_sql sample/select_only.sql
 ./mini_sql sample/select_columns.sql
+./mini_sql sample/select_where.sql
 ```
 
 ## 예제
@@ -134,6 +139,14 @@ SELECT * FROM users;
 SELECT name, age FROM users;
 ```
 
+### WHERE로 조건 조회하는 예제
+
+`sample/select_where.sql`
+
+```sql
+SELECT name, age FROM users WHERE name = 'Alice';
+```
+
 ## 기능 테스트 시나리오
 
 아래 시나리오를 기준으로 주요 기능을 검증합니다.
@@ -143,7 +156,7 @@ SELECT name, age FROM users;
 3. SQL 파일 안의 여러 문장을 세미콜론 기준으로 순차 실행한다.
 4. 빈 문장은 무시하고 나머지 SQL만 실행한다.
 5. `INSERT` 실행 시 schema 로드, 값 개수 검증, 타입 캐스팅, CSV append 흐름이 연결된다.
-6. `SELECT *` 또는 명시적 컬럼 SELECT 실행 시 필요한 컬럼만 표 형태로 출력한다.
+6. `SELECT *`, 명시적 컬럼 SELECT, 단일 WHERE SELECT 실행 시 필요한 row/컬럼만 표 형태로 출력한다.
 7. parse 또는 execute 단계 실패 시 몇 번째 문장에서 실패했는지 함께 알려준다.
 
 더 자세한 테스트 빌드/실행 방법은 [tests/README.md](/Users/jinhyuk/krafton/Mini_SQL/tests/README.md)에 정리되어 있습니다.
@@ -153,11 +166,12 @@ SELECT name, age FROM users;
 현재는 아래 기능을 지원하지 않습니다.
 
 - REPL
-- `WHERE`
+- `WHERE`의 다중 조건
 - `UPDATE`
 - `DELETE`
 - `CREATE TABLE`
 - `JOIN`
+- `AND`, `OR`, `>`, `<`, `LIKE`
 - 복잡한 SQL 일반화
 - CSV quoting / escaping
 - 문자열 내부 작은따옴표 escape
