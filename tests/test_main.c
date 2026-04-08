@@ -344,6 +344,132 @@ static int test_split_sql_statements_unterminated_quote(void)
     return strstr(error_buf, "작은따옴표") == NULL;
 }
 
+/* 줄 중간에 커서를 둔 상태에서도 문자를 끼워 넣을 수 있어야 한다. */
+static int test_repl_insert_character_at_cursor(void)
+{
+    char buffer[32] = "ab";
+    size_t length = 2;
+    size_t cursor = 1;
+
+    if (insert_repl_character(buffer, &length, &cursor, sizeof(buffer), 'X') != 0)
+    {
+        return 1;
+    }
+
+    if (strcmp(buffer, "aXb") != 0)
+    {
+        return 1;
+    }
+    if (length != 3 || cursor != 2)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* 백스페이스는 커서 왼쪽 문자만 지우고 나머지 문자열을 당겨야 한다. */
+static int test_repl_delete_character_left(void)
+{
+    char buffer[32] = "aXb";
+    size_t length = 3;
+    size_t cursor = 2;
+
+    delete_repl_character_left(buffer, &length, &cursor);
+
+    if (strcmp(buffer, "ab") != 0)
+    {
+        return 1;
+    }
+    if (length != 2 || cursor != 1)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* 좌우 화살표에 대응하는 커서 이동 helper가 경계를 넘지 않아야 한다. */
+static int test_repl_cursor_move_helpers(void)
+{
+    size_t cursor = 1;
+
+    move_repl_cursor_left(&cursor);
+    if (cursor != 0)
+    {
+        return 1;
+    }
+
+    move_repl_cursor_left(&cursor);
+    if (cursor != 0)
+    {
+        return 1;
+    }
+
+    move_repl_cursor_right(&cursor, 3);
+    if (cursor != 1)
+    {
+        return 1;
+    }
+
+    move_repl_cursor_right(&cursor, 3);
+    move_repl_cursor_right(&cursor, 3);
+    move_repl_cursor_right(&cursor, 3);
+    return cursor != 3;
+}
+
+/* TTY가 아닌 입력에서는 기존 fgets fallback이 줄 끝 개행만 제거하고 읽어야 한다. */
+static int test_read_repl_line_fallback_trims_line_ending(void)
+{
+    FILE *input_file = NULL;
+    FILE *output_file = NULL;
+    char buffer[128];
+    char error_buf[MAX_ERROR_LENGTH];
+    int read_result = 0;
+
+    input_file = tmpfile();
+    output_file = tmpfile();
+    if (input_file == NULL || output_file == NULL)
+    {
+        if (input_file != NULL)
+        {
+            fclose(input_file);
+        }
+        if (output_file != NULL)
+        {
+            fclose(output_file);
+        }
+        return 1;
+    }
+
+    if (fputs("SELECT * FROM users;\n", input_file) == EOF)
+    {
+        fclose(input_file);
+        fclose(output_file);
+        return 1;
+    }
+
+    rewind(input_file);
+    read_result = read_repl_line(
+        input_file,
+        output_file,
+        buffer,
+        sizeof(buffer),
+        error_buf,
+        sizeof(error_buf));
+
+    fclose(input_file);
+    fclose(output_file);
+
+    if (read_result != 0)
+    {
+        fprintf(stderr, "%s\n", error_buf);
+        return 1;
+    }
+
+    return strcmp(buffer, "SELECT * FROM users;");
+}
+
 /* 인자 없이 실행하면 REPL 모드로 진입하고 EOF에서 정상 종료해야 한다. */
 static int test_main_enters_repl_without_argument(void)
 {
@@ -974,6 +1100,12 @@ int main(void)
     failures += run_test(
         "split sql statements unterminated quote",
         test_split_sql_statements_unterminated_quote);
+    failures += run_test("repl insert character at cursor", test_repl_insert_character_at_cursor);
+    failures += run_test("repl delete character left", test_repl_delete_character_left);
+    failures += run_test("repl cursor move helpers", test_repl_cursor_move_helpers);
+    failures += run_test(
+        "read repl line fallback trims line ending",
+        test_read_repl_line_fallback_trims_line_ending);
     failures += run_test("main enters repl without argument", test_main_enters_repl_without_argument);
     failures += run_test("main usage with too many arguments", test_main_usage_with_too_many_arguments);
     failures += run_test("main missing sql file", test_main_missing_sql_file);

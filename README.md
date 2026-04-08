@@ -65,6 +65,7 @@ SELECT name, age FROM users WHERE name = 'kim';
 - 공백은 적당히 유연하게 허용합니다
 - REPL에서도 한 줄에 한 SQL 문장만 입력할 수 있습니다
 - REPL에서는 세미콜론이 있어도 되고 없어도 됩니다
+- 터미널 REPL에서는 왼쪽/오른쪽 화살표 키로 커서를 이동할 수 있습니다
 
 예시 출력:
 
@@ -127,6 +128,7 @@ Mini_SQL REPL
 - 한 줄에 SQL 한 문장만 입력할 수 있습니다
 - 세미콜론은 있어도 되고 없어도 됩니다
 - exit 또는 quit 를 입력하면 종료합니다
+- 왼쪽/오른쪽 화살표 키로 커서를 이동할 수 있습니다
 mini_sql> INSERT INTO users VALUES (3, 'Choi', 40)
 INSERT 1
 mini_sql> SELECT name, age FROM users WHERE id = 3
