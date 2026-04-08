@@ -18,6 +18,21 @@ Run the schema manager unit test:
 ./tests/test_schema_manager
 ```
 
+Build the storage unit test:
+
+```sh
+cc -std=c11 -Wall -Wextra -pedantic -I. tests/test_storage.c storage.c schema_manager.c -o tests/test_storage
+```
+
+Run the storage unit test:
+
+```sh
+./tests/test_storage
+```
+
+The storage test binary changes directory to `tests/fixtures` internally and
+cleans up the CSV files it creates during the run.
+
 Current smoke scenarios for the app:
 
 ```sh
