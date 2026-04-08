@@ -93,6 +93,7 @@ cleans up the CSV files it creates during the run.
 - 특정 컬럼 SELECT 실행 후 요청한 컬럼만 출력
 - 단일 WHERE SELECT 실행 후 조건에 맞는 row만 출력
 - REPL에서 세미콜론 없는 한 줄 SQL 실행
+- 터미널 REPL에서 좌우 화살표 입력 시 커서 이동
 - REPL에서 오류가 나도 다음 입력 계속 처리
 - parse 실패 시 몇 번째 문장에서 실패했는지 보고
 - execute 실패 시 몇 번째 문장에서 실패했는지 보고

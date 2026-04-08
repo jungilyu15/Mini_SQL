@@ -1,9 +1,15 @@
+#include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 
 #include "executor.h"
 #include "parser.h"
+
+#define REPL_PROMPT_TEXT "mini_sql> "
 
 /*
  * split_sql_statements가 분리한 SQL 문장 목록을 담는 구조체다.
@@ -32,7 +38,7 @@ static void print_repl_help(FILE *out_stream)
 /* REPL 프롬프트를 출력하고 즉시 flush한다. */
 static void print_repl_prompt(FILE *out_stream)
 {
-    fprintf(out_stream, "mini_sql> ");
+    fprintf(out_stream, "%s", REPL_PROMPT_TEXT);
     fflush(out_stream);
 }
 
@@ -87,6 +93,375 @@ static void trim_line_ending(char *text)
         text[length - 1] = '\0';
         length--;
     }
+}
+
+/*
+ * REPL 입력 버퍼의 현재 커서 위치에 문자 하나를 끼워 넣는다.
+ *
+ * 사용자가 줄 중간으로 커서를 옮긴 뒤 문자를 입력할 수 있게 하려면
+ * 단순 append가 아니라 현재 커서 뒤의 내용을 한 칸씩 밀어야 한다.
+ */
+static int insert_repl_character(
+    char *buffer,
+    size_t *length,
+    size_t *cursor,
+    size_t buffer_size,
+    char ch
+)
+{
+    if (buffer == NULL || length == NULL || cursor == NULL || buffer_size == 0)
+    {
+        return -1;
+    }
+
+    if (*length + 1 >= buffer_size)
+    {
+        return -1;
+    }
+
+    memmove(
+        buffer + *cursor + 1,
+        buffer + *cursor,
+        (*length - *cursor) + 1);
+    buffer[*cursor] = ch;
+    (*length)++;
+    (*cursor)++;
+    return 0;
+}
+
+/*
+ * 백스페이스 입력 시 커서 왼쪽의 문자 하나를 지운다.
+ * 커서가 줄 맨 앞이면 지울 문자가 없으므로 아무 것도 하지 않는다.
+ */
+static void delete_repl_character_left(char *buffer, size_t *length, size_t *cursor)
+{
+    if (buffer == NULL || length == NULL || cursor == NULL)
+    {
+        return;
+    }
+
+    if (*cursor == 0 || *length == 0)
+    {
+        return;
+    }
+
+    memmove(
+        buffer + *cursor - 1,
+        buffer + *cursor,
+        (*length - *cursor) + 1);
+    (*cursor)--;
+    (*length)--;
+}
+
+/* 왼쪽 화살표 입력에 맞춰 커서를 한 칸 왼쪽으로 옮긴다. */
+static void move_repl_cursor_left(size_t *cursor)
+{
+    if (cursor != NULL && *cursor > 0)
+    {
+        (*cursor)--;
+    }
+}
+
+/* 오른쪽 화살표 입력에 맞춰 커서를 한 칸 오른쪽으로 옮긴다. */
+static void move_repl_cursor_right(size_t *cursor, size_t length)
+{
+    if (cursor != NULL && *cursor < length)
+    {
+        (*cursor)++;
+    }
+}
+
+/*
+ * 현재 편집 중인 REPL 한 줄을 다시 그린다.
+ *
+ * raw mode에서는 터미널이 입력 편집을 대신 해주지 않으므로,
+ * 문자를 끼워 넣거나 지웠을 때는 프롬프트와 전체 버퍼를 직접 다시 그려야 한다.
+ */
+static void redraw_repl_input(FILE *out_stream, const char *buffer, size_t length, size_t cursor)
+{
+    size_t tail_length = 0;
+
+    if (out_stream == NULL || buffer == NULL)
+    {
+        return;
+    }
+
+    tail_length = length - cursor;
+    fprintf(out_stream, "\r%s%s", REPL_PROMPT_TEXT, buffer);
+    fprintf(out_stream, "\x1b[K");
+    if (tail_length > 0)
+    {
+        fprintf(out_stream, "\x1b[%zuD", tail_length);
+    }
+    fflush(out_stream);
+}
+
+/*
+ * REPL 입력용 raw mode를 켠다.
+ *
+ * canonical mode를 끄면 화살표 키가 만들어내는 escape sequence를
+ * 프로그램이 직접 읽어 처리할 수 있다.
+ */
+static int enable_repl_raw_mode(
+    int fd,
+    struct termios *original_termios,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    struct termios raw_termios;
+
+    if (original_termios == NULL)
+    {
+        set_error(error_buf, error_buf_size, "main: REPL raw mode 초기 인자가 올바르지 않습니다");
+        return -1;
+    }
+
+    if (tcgetattr(fd, original_termios) != 0)
+    {
+        snprintf(
+            error_buf,
+            error_buf_size,
+            "main: REPL 터미널 설정을 읽을 수 없습니다: %s",
+            strerror(errno));
+        return -1;
+    }
+
+    raw_termios = *original_termios;
+    raw_termios.c_lflag &= ~(ICANON | ECHO);
+    raw_termios.c_cc[VMIN] = 1;
+    raw_termios.c_cc[VTIME] = 0;
+
+    if (tcsetattr(fd, TCSAFLUSH, &raw_termios) != 0)
+    {
+        snprintf(
+            error_buf,
+            error_buf_size,
+            "main: REPL raw mode를 설정할 수 없습니다: %s",
+            strerror(errno));
+        return -1;
+    }
+
+    return 0;
+}
+
+/* REPL 입력이 끝나면 원래 터미널 설정으로 되돌린다. */
+static void disable_repl_raw_mode(int fd, const struct termios *original_termios)
+{
+    if (original_termios != NULL)
+    {
+        tcsetattr(fd, TCSAFLUSH, original_termios);
+    }
+}
+
+/*
+ * 화살표 키 escape sequence를 읽어 커서 이동으로 변환한다.
+ *
+ * 현재는 왼쪽/오른쪽 화살표만 지원하고,
+ * 위/아래 화살표나 그 외 제어 시퀀스는 조용히 무시한다.
+ */
+static void handle_repl_escape_sequence(int fd, size_t *cursor, size_t length)
+{
+    char sequence[2];
+    ssize_t bytes_read = 0;
+
+    bytes_read = read(fd, &sequence[0], 1);
+    if (bytes_read <= 0)
+    {
+        return;
+    }
+
+    bytes_read = read(fd, &sequence[1], 1);
+    if (bytes_read <= 0)
+    {
+        return;
+    }
+
+    if (sequence[0] != '[')
+    {
+        return;
+    }
+
+    if (sequence[1] == 'D')
+    {
+        move_repl_cursor_left(cursor);
+    }
+    else if (sequence[1] == 'C')
+    {
+        move_repl_cursor_right(cursor, length);
+    }
+}
+
+/*
+ * TTY 환경에서 REPL 한 줄을 직접 읽는다.
+ *
+ * - 좌우 화살표 커서 이동 지원
+ * - 백스페이스 지원
+ * - 줄 중간 문자 삽입 지원
+ * - Ctrl-D는 빈 줄에서만 EOF로 취급
+ */
+static int read_tty_repl_line(
+    FILE *in_stream,
+    FILE *out_stream,
+    char *buffer,
+    size_t buffer_size,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    int fd = -1;
+    struct termios original_termios;
+    size_t length = 0;
+    size_t cursor = 0;
+
+    if (in_stream == NULL || out_stream == NULL || buffer == NULL || buffer_size == 0)
+    {
+        set_error(error_buf, error_buf_size, "main: REPL TTY 입력 인자가 올바르지 않습니다");
+        return -1;
+    }
+
+    fd = fileno(in_stream);
+    buffer[0] = '\0';
+
+    if (enable_repl_raw_mode(fd, &original_termios, error_buf, error_buf_size) != 0)
+    {
+        return -1;
+    }
+
+    while (1)
+    {
+        char ch = '\0';
+        ssize_t bytes_read = read(fd, &ch, 1);
+
+        if (bytes_read == 0)
+        {
+            disable_repl_raw_mode(fd, &original_termios);
+            fprintf(out_stream, "\n");
+            return 1;
+        }
+
+        if (bytes_read < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+
+            disable_repl_raw_mode(fd, &original_termios);
+            snprintf(
+                error_buf,
+                error_buf_size,
+                "main: REPL 입력을 읽는 중 오류가 발생했습니다: %s",
+                strerror(errno));
+            return -1;
+        }
+
+        if (ch == '\r' || ch == '\n')
+        {
+            buffer[length] = '\0';
+            disable_repl_raw_mode(fd, &original_termios);
+            fprintf(out_stream, "\n");
+            return 0;
+        }
+
+        if (ch == 4)
+        {
+            if (length == 0)
+            {
+                disable_repl_raw_mode(fd, &original_termios);
+                fprintf(out_stream, "\n");
+                return 1;
+            }
+            continue;
+        }
+
+        if (ch == 27)
+        {
+            handle_repl_escape_sequence(fd, &cursor, length);
+            redraw_repl_input(out_stream, buffer, length, cursor);
+            continue;
+        }
+
+        if (ch == 127 || ch == '\b')
+        {
+            delete_repl_character_left(buffer, &length, &cursor);
+            redraw_repl_input(out_stream, buffer, length, cursor);
+            continue;
+        }
+
+        if (isprint((unsigned char)ch))
+        {
+            if (insert_repl_character(buffer, &length, &cursor, buffer_size, ch) != 0)
+            {
+                fprintf(out_stream, "\a");
+                fflush(out_stream);
+                continue;
+            }
+
+            redraw_repl_input(out_stream, buffer, length, cursor);
+        }
+    }
+}
+
+/*
+ * REPL 한 줄 입력을 읽는다.
+ *
+ * - 터미널(TTY)에서는 직접 line editing을 수행해 좌우 화살표를 지원한다.
+ * - 테스트나 파이프 입력처럼 TTY가 아니면 기존 fgets 기반 fallback을 사용한다.
+ *
+ * 반환값:
+ * - 0: 한 줄을 정상적으로 읽음
+ * - 1: EOF
+ * - -1: 입력 오류
+ */
+static int read_repl_line(
+    FILE *in_stream,
+    FILE *out_stream,
+    char *buffer,
+    size_t buffer_size,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    int input_fd = -1;
+    int output_fd = -1;
+
+    if (in_stream == NULL || out_stream == NULL || buffer == NULL || buffer_size == 0)
+    {
+        set_error(error_buf, error_buf_size, "main: REPL 입력 인자가 올바르지 않습니다");
+        return -1;
+    }
+
+    buffer[0] = '\0';
+    input_fd = fileno(in_stream);
+    output_fd = fileno(out_stream);
+
+    if (input_fd >= 0 && output_fd >= 0 &&
+        isatty(input_fd) != 0 && isatty(output_fd) != 0)
+    {
+        return read_tty_repl_line(
+            in_stream,
+            out_stream,
+            buffer,
+            buffer_size,
+            error_buf,
+            error_buf_size);
+    }
+
+    if (fgets(buffer, buffer_size, in_stream) == NULL)
+    {
+        if (ferror(in_stream))
+        {
+            set_error(error_buf, error_buf_size, "main: REPL 입력을 읽는 중 오류가 발생했습니다");
+            return -1;
+        }
+
+        fprintf(out_stream, "\n");
+        return 1;
+    }
+
+    trim_line_ending(buffer);
+    return 0;
 }
 
 /*
@@ -593,15 +968,25 @@ static int run_repl(FILE *in_stream, FILE *out_stream, FILE *error_stream)
         const char *trimmed_start = NULL;
         const char *trimmed_end = NULL;
         size_t trimmed_length = 0;
+        int read_result = 0;
 
         print_repl_prompt(out_stream);
-        if (fgets(line_buffer, sizeof(line_buffer), in_stream) == NULL)
+        read_result = read_repl_line(
+            in_stream,
+            out_stream,
+            line_buffer,
+            sizeof(line_buffer),
+            error_buf,
+            sizeof(error_buf));
+        if (read_result == 1)
         {
-            fprintf(out_stream, "\n");
             break;
         }
-
-        trim_line_ending(line_buffer);
+        if (read_result != 0)
+        {
+            fprintf(error_stream, "repl failed: %s\n", error_buf);
+            continue;
+        }
 
         trimmed_start = line_buffer;
         trimmed_end = line_buffer + strlen(line_buffer);
