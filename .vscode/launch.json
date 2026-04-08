@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Mini_SQL: REPL",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/mini_sql",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build mini_sql",
+      "terminal": "integrated"
+    },
+    {
+      "name": "Mini_SQL: basic.sql",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/mini_sql",
+      "args": [
+        "sample/basic.sql"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build mini_sql",
+      "terminal": "integrated"
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/jinhyuk/krafton/Mini_SQL",
+      "program": "/Users/jinhyuk/krafton/Mini_SQL/build/Debug/outDebug"
+    }
+  ]
+}
