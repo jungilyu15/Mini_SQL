@@ -11,8 +11,8 @@
 /*
  * storage.c 내부 helper는 아래 역할로 나눈다.
  * - 오류/경로 처리 helper
- * - StorageRow <-> CSV 한 줄 변환 helper
- * - row list 동적 확장 helper
+ * - StorageRow <-> CSV 한 줄 변환 helper -> append_row
+ * - row list 동적 확장 helper ->  조회에서 realloc
  *
  * 공개 API는 append_row / read_all_rows / free_storage_row_list 세 개만 유지한다.
  */
@@ -21,8 +21,10 @@
  * 공통 오류 메시지 기록 helper.
  * error_buf가 NULL이어도 안전하게 호출할 수 있도록 방어적으로 처리한다.
  */
-static void set_error(char *error_buf, size_t error_buf_size, const char *message) {
-    if (error_buf != NULL && error_buf_size > 0) {
+static void set_error(char *error_buf, size_t error_buf_size, const char *message)
+{
+    if (error_buf != NULL && error_buf_size > 0)
+    {
         snprintf(error_buf, error_buf_size, "%s", message);
     }
 }
@@ -31,10 +33,12 @@ static void set_error(char *error_buf, size_t error_buf_size, const char *messag
  * 가변 인자를 받아 형식화된 오류 메시지를 기록한다.
  * 같은 패턴의 snprintf 코드를 반복하지 않도록 별도 helper로 분리한다.
  */
-static void set_errorf(char *error_buf, size_t error_buf_size, const char *format, ...) {
+static void set_errorf(char *error_buf, size_t error_buf_size, const char *format, ...)
+{
     va_list args;
 
-    if (error_buf == NULL || error_buf_size == 0 || format == NULL) {
+    if (error_buf == NULL || error_buf_size == 0 || format == NULL)
+    {
         return;
     }
 
@@ -47,8 +51,10 @@ static void set_errorf(char *error_buf, size_t error_buf_size, const char *forma
  * 함수 시작 시 결과 구조체를 항상 예측 가능한 상태로 맞춘다.
  * 실패 후에도 caller가 free_storage_row_list()를 안전하게 호출할 수 있어야 한다.
  */
-static void init_row_list(StorageRowList *row_list) {
-    if (row_list != NULL) {
+static void init_row_list(StorageRowList *row_list)
+{
+    if (row_list != NULL)
+    {
         row_list->row_count = 0;
         row_list->rows = NULL;
     }
@@ -58,15 +64,18 @@ static void init_row_list(StorageRowList *row_list) {
  * 이번 단계에서는 data 디렉터리가 미리 존재한다고 가정한다.
  * 따라서 디렉터리가 없으면 자동 생성하지 않고 명확한 오류로 처리한다.
  */
-static int ensure_data_directory_exists(char *error_buf, size_t error_buf_size) {
+static int ensure_data_directory_exists(char *error_buf, size_t error_buf_size)
+{
     struct stat st;
 
-    if (stat("data", &st) != 0) {
+    if (stat("data", &st) != 0)
+    {
         set_error(error_buf, error_buf_size, "storage: data 디렉터리를 찾을 수 없습니다");
         return -1;
     }
 
-    if (!S_ISDIR(st.st_mode)) {
+    if (!S_ISDIR(st.st_mode))
+    {
         set_error(error_buf, error_buf_size, "storage: 'data' 경로가 디렉터리가 아닙니다");
         return -1;
     }
@@ -83,17 +92,19 @@ static int build_data_path(
     char *out_path,
     size_t out_path_size,
     char *error_buf,
-    size_t error_buf_size
-) {
+    size_t error_buf_size)
+{
     int written = 0;
 
-    if (table_name == NULL || table_name[0] == '\0' || out_path == NULL || out_path_size == 0) {
+    if (table_name == NULL || table_name[0] == '\0' || out_path == NULL || out_path_size == 0)
+    {
         set_error(error_buf, error_buf_size, "storage: 잘못된 table_name/path 인자입니다");
         return -1;
     }
 
     written = snprintf(out_path, out_path_size, "data/%s.csv", table_name);
-    if (written < 0 || (size_t)written >= out_path_size) {
+    if (written < 0 || (size_t)written >= out_path_size)
+    {
         set_error(error_buf, error_buf_size, "storage: 데이터 파일 경로가 너무 깁니다");
         return -1;
     }
@@ -108,28 +119,31 @@ static int build_data_path(
 static int validate_text_value(
     const char *text,
     char *error_buf,
-    size_t error_buf_size
-) {
+    size_t error_buf_size)
+{
     const char *cursor = NULL;
 
-    if (text == NULL) {
+    if (text == NULL)
+    {
         set_error(error_buf, error_buf_size, "storage: TEXT 값이 NULL입니다");
         return -1;
     }
 
-    if (strlen(text) >= MAX_VALUE_LENGTH) {
+    if (strlen(text) >= MAX_VALUE_LENGTH)
+    {
         set_error(error_buf, error_buf_size, "storage: TEXT 값 길이가 너무 깁니다");
         return -1;
     }
 
     cursor = text;
-    while (*cursor != '\0') {
-        if (*cursor == ',' || *cursor == '\n' || *cursor == '\r' || *cursor == '"') {
+    while (*cursor != '\0')
+    {
+        if (*cursor == ',' || *cursor == '\n' || *cursor == '\r' || *cursor == '"')
+        {
             set_error(
                 error_buf,
                 error_buf_size,
-                "storage: TEXT 값에는 쉼표, 개행, 큰따옴표를 포함할 수 없습니다"
-            );
+                "storage: TEXT 값에는 쉼표, 개행, 큰따옴표를 포함할 수 없습니다");
             return -1;
         }
         cursor++;
@@ -146,24 +160,27 @@ static int parse_int_strict(
     const char *text,
     int *out_value,
     char *error_buf,
-    size_t error_buf_size
-) {
+    size_t error_buf_size)
+{
     char *end_ptr = NULL;
     long parsed = 0;
 
-    if (text == NULL || out_value == NULL || text[0] == '\0') {
+    if (text == NULL || out_value == NULL || text[0] == '\0')
+    {
         set_error(error_buf, error_buf_size, "storage: 비어 있는 int 값을 읽을 수 없습니다");
         return -1;
     }
 
     errno = 0;
     parsed = strtol(text, &end_ptr, 10);
-    if (errno != 0 || end_ptr == text || *end_ptr != '\0') {
+    if (errno != 0 || end_ptr == text || *end_ptr != '\0')
+    {
         set_errorf(error_buf, error_buf_size, "storage: '%s'은(는) 유효한 int 값이 아닙니다", text);
         return -1;
     }
 
-    if (parsed < INT_MIN || parsed > INT_MAX) {
+    if (parsed < INT_MIN || parsed > INT_MAX)
+    {
         set_errorf(error_buf, error_buf_size, "storage: '%s'은(는) int 범위를 벗어납니다", text);
         return -1;
     }
@@ -180,11 +197,12 @@ static int validate_row_against_schema(
     const TableSchema *schema,
     const StorageRow *row,
     char *error_buf,
-    size_t error_buf_size
-) {
+    size_t error_buf_size)
+{
     size_t i = 0;
 
-    if (schema == NULL || row == NULL) {
+    if (schema == NULL || row == NULL)
+    {
         set_error(error_buf, error_buf_size, "storage: schema 또는 row가 NULL입니다");
         return -1;
     }
@@ -193,35 +211,38 @@ static int validate_row_against_schema(
      * schema_manager가 정상 schema를 넘겨 준다고 가정하지만,
      * storage 단에서도 최소한의 방어 검사는 해 둔다.
      */
-    if (schema->column_count == 0 || schema->column_count > MAX_COLUMNS) {
+    if (schema->column_count == 0 || schema->column_count > MAX_COLUMNS)
+    {
         set_error(error_buf, error_buf_size, "storage: schema column 수가 올바르지 않습니다");
         return -1;
     }
 
-    if (row->value_count != schema->column_count) {
+    if (row->value_count != schema->column_count)
+    {
         set_errorf(
             error_buf,
             error_buf_size,
             "storage: row 값 개수(%zu)와 schema column 수(%zu)가 다릅니다",
             row->value_count,
-            schema->column_count
-        );
+            schema->column_count);
         return -1;
     }
 
-    for (i = 0; i < schema->column_count; i++) {
-        if (row->values[i].type != schema->columns[i].type) {
+    for (i = 0; i < schema->column_count; i++)
+    {
+        if (row->values[i].type != schema->columns[i].type)
+        {
             set_errorf(
                 error_buf,
                 error_buf_size,
                 "storage: '%s' column의 row 타입과 schema 타입이 다릅니다",
-                schema->columns[i].name
-            );
+                schema->columns[i].name);
             return -1;
         }
 
         if (row->values[i].type == COL_TEXT &&
-            validate_text_value(row->values[i].as.string_value, error_buf, error_buf_size) != 0) {
+            validate_text_value(row->values[i].as.string_value, error_buf, error_buf_size) != 0)
+        {
             return -1;
         }
     }
@@ -239,27 +260,32 @@ static int serialize_row_to_csv_line(
     char *out_line,
     size_t out_line_size,
     char *error_buf,
-    size_t error_buf_size
-) {
+    size_t error_buf_size)
+{
     size_t i = 0;
     size_t used = 0;
 
-    if (validate_row_against_schema(schema, row, error_buf, error_buf_size) != 0) {
+    if (validate_row_against_schema(schema, row, error_buf, error_buf_size) != 0)
+    {
         return -1;
     }
 
-    if (out_line == NULL || out_line_size == 0) {
+    if (out_line == NULL || out_line_size == 0)
+    {
         set_error(error_buf, error_buf_size, "storage: CSV 직렬화 버퍼가 올바르지 않습니다");
         return -1;
     }
 
     out_line[0] = '\0';
 
-    for (i = 0; i < schema->column_count; i++) {
+    for (i = 0; i < schema->column_count; i++)
+    {
         int written = 0;
 
-        if (i > 0) {
-            if (used + 1 >= out_line_size) {
+        if (i > 0)
+        {
+            if (used + 1 >= out_line_size)
+            {
                 set_error(error_buf, error_buf_size, "storage: CSV 한 줄 길이가 너무 깁니다");
                 return -1;
             }
@@ -267,22 +293,26 @@ static int serialize_row_to_csv_line(
             out_line[used] = '\0';
         }
 
-        if (schema->columns[i].type == COL_INT) {
+        if (schema->columns[i].type == COL_INT)
+        {
             written = snprintf(
                 out_line + used,
                 out_line_size - used,
                 "%d",
-                row->values[i].as.int_value
-            );
-            if (written < 0 || (size_t)written >= out_line_size - used) {
+                row->values[i].as.int_value);
+            if (written < 0 || (size_t)written >= out_line_size - used)
+            {
                 set_error(error_buf, error_buf_size, "storage: CSV 한 줄 길이가 너무 깁니다");
                 return -1;
             }
             used += (size_t)written;
-        } else {
+        }
+        else
+        {
             size_t text_length = strlen(row->values[i].as.string_value);
 
-            if (used + text_length >= out_line_size) {
+            if (used + text_length >= out_line_size)
+            {
                 set_error(error_buf, error_buf_size, "storage: CSV 한 줄 길이가 너무 깁니다");
                 return -1;
             }
@@ -297,7 +327,8 @@ static int serialize_row_to_csv_line(
      * 실제 파일에는 마지막에 개행을 붙여 저장하므로
      * 직렬화 결과 길이 + 1(개행)도 MAX_LINE_LENGTH 안에 들어야 한다.
      */
-    if (used + 1 > MAX_LINE_LENGTH) {
+    if (used + 1 > MAX_LINE_LENGTH)
+    {
         set_error(error_buf, error_buf_size, "storage: CSV 한 줄 길이가 MAX_LINE_LENGTH를 초과합니다");
         return -1;
     }
@@ -309,15 +340,18 @@ static int serialize_row_to_csv_line(
  * fgets로 읽은 문자열 끝의 개행 문자를 제거한다.
  * CRLF 환경도 고려해 '\n', '\r'을 모두 떼어낸다.
  */
-static void strip_line_endings(char *line) {
+static void strip_line_endings(char *line)
+{
     size_t length = 0;
 
-    if (line == NULL) {
+    if (line == NULL)
+    {
         return;
     }
 
     length = strlen(line);
-    while (length > 0 && (line[length - 1] == '\n' || line[length - 1] == '\r')) {
+    while (length > 0 && (line[length - 1] == '\n' || line[length - 1] == '\r'))
+    {
         line[length - 1] = '\0';
         length--;
     }
@@ -332,17 +366,19 @@ static int parse_csv_line_to_row(
     const TableSchema *schema,
     StorageRow *out_row,
     char *error_buf,
-    size_t error_buf_size
-) {
+    size_t error_buf_size)
+{
     const char *cursor = NULL;
     size_t i = 0;
 
-    if (line == NULL || schema == NULL || out_row == NULL) {
+    if (line == NULL || schema == NULL || out_row == NULL)
+    {
         set_error(error_buf, error_buf_size, "storage: CSV 파싱 인자가 올바르지 않습니다");
         return -1;
     }
 
-    if (schema->column_count == 0 || schema->column_count > MAX_COLUMNS) {
+    if (schema->column_count == 0 || schema->column_count > MAX_COLUMNS)
+    {
         set_error(error_buf, error_buf_size, "storage: schema column 수가 올바르지 않습니다");
         return -1;
     }
@@ -351,26 +387,33 @@ static int parse_csv_line_to_row(
     out_row->value_count = schema->column_count;
     cursor = line;
 
-    for (i = 0; i < schema->column_count; i++) {
+    for (i = 0; i < schema->column_count; i++)
+    {
         const char *separator = strchr(cursor, ',');
         char field[MAX_VALUE_LENGTH];
         size_t field_length = 0;
 
-        if (i < schema->column_count - 1) {
-            if (separator == NULL) {
+        if (i < schema->column_count - 1)
+        {
+            if (separator == NULL)
+            {
                 set_error(error_buf, error_buf_size, "storage: CSV 필드 개수가 schema와 다릅니다");
                 return -1;
             }
             field_length = (size_t)(separator - cursor);
-        } else {
-            if (separator != NULL) {
+        }
+        else
+        {
+            if (separator != NULL)
+            {
                 set_error(error_buf, error_buf_size, "storage: CSV 필드 개수가 schema와 다릅니다");
                 return -1;
             }
             field_length = strlen(cursor);
         }
 
-        if (field_length >= sizeof(field)) {
+        if (field_length >= sizeof(field))
+        {
             set_error(error_buf, error_buf_size, "storage: CSV 필드 길이가 너무 깁니다");
             return -1;
         }
@@ -379,19 +422,25 @@ static int parse_csv_line_to_row(
         field[field_length] = '\0';
 
         out_row->values[i].type = schema->columns[i].type;
-        if (schema->columns[i].type == COL_INT) {
-            if (parse_int_strict(field, &out_row->values[i].as.int_value, error_buf, error_buf_size) != 0) {
+        if (schema->columns[i].type == COL_INT)
+        {
+            if (parse_int_strict(field, &out_row->values[i].as.int_value, error_buf, error_buf_size) != 0)
+            {
                 return -1;
             }
-        } else {
-            if (strlen(field) >= sizeof(out_row->values[i].as.string_value)) {
+        }
+        else
+        {
+            if (strlen(field) >= sizeof(out_row->values[i].as.string_value))
+            {
                 set_error(error_buf, error_buf_size, "storage: 문자열 필드 길이가 너무 깁니다");
                 return -1;
             }
             memcpy(out_row->values[i].as.string_value, field, field_length + 1);
         }
 
-        if (separator != NULL) {
+        if (separator != NULL)
+        {
             cursor = separator + 1;
         }
     }
@@ -411,17 +460,19 @@ static int append_row_to_list(
     StorageRowList *row_list,
     const StorageRow *row,
     char *error_buf,
-    size_t error_buf_size
-) {
+    size_t error_buf_size)
+{
     StorageRow *resized_rows = NULL;
 
-    if (row_list == NULL || row == NULL) {
+    if (row_list == NULL || row == NULL)
+    {
         set_error(error_buf, error_buf_size, "storage: row list 추가 인자가 올바르지 않습니다");
         return -1;
     }
 
     resized_rows = realloc(row_list->rows, sizeof(StorageRow) * (row_list->row_count + 1));
-    if (resized_rows == NULL) {
+    if (resized_rows == NULL)
+    {
         set_error(error_buf, error_buf_size, "storage: row 배열 메모리 할당에 실패했습니다");
         return -1;
     }
@@ -437,59 +488,63 @@ int append_row(
     const TableSchema *schema,
     const StorageRow *row,
     char *error_buf,
-    size_t error_buf_size
-) {
+    size_t error_buf_size)
+{
     char path[256];
     char line[MAX_LINE_LENGTH + 1];
     FILE *file = NULL;
 
-    if (table_name == NULL || schema == NULL || row == NULL) {
+    if (table_name == NULL || schema == NULL || row == NULL)
+    {
         set_error(error_buf, error_buf_size, "append_row: 잘못된 인자입니다");
         return -1;
     }
 
-    if (ensure_data_directory_exists(error_buf, error_buf_size) != 0) {
+    if (ensure_data_directory_exists(error_buf, error_buf_size) != 0)
+    {
         return -1;
     }
 
-    if (build_data_path(table_name, path, sizeof(path), error_buf, error_buf_size) != 0) {
+    if (build_data_path(table_name, path, sizeof(path), error_buf, error_buf_size) != 0)
+    {
         return -1;
     }
 
-    if (serialize_row_to_csv_line(schema, row, line, sizeof(line), error_buf, error_buf_size) != 0) {
+    if (serialize_row_to_csv_line(schema, row, line, sizeof(line), error_buf, error_buf_size) != 0)
+    {
         return -1;
     }
 
     file = fopen(path, "a");
-    if (file == NULL) {
+    if (file == NULL)
+    {
         set_errorf(
             error_buf,
             error_buf_size,
             "append_row: 데이터 파일 '%s'을(를) 열 수 없습니다: %s",
             path,
-            strerror(errno)
-        );
+            strerror(errno));
         return -1;
     }
 
-    if (fprintf(file, "%s\n", line) < 0) {
+    if (fprintf(file, "%s\n", line) < 0)
+    {
         set_errorf(
             error_buf,
             error_buf_size,
             "append_row: 데이터 파일 '%s'에 쓰는 중 오류가 발생했습니다",
-            path
-        );
+            path);
         fclose(file);
         return -1;
     }
 
-    if (fclose(file) != 0) {
+    if (fclose(file) != 0)
+    {
         set_errorf(
             error_buf,
             error_buf_size,
             "append_row: 데이터 파일 '%s'을(를) 닫는 중 오류가 발생했습니다",
-            path
-        );
+            path);
         return -1;
     }
 
@@ -501,30 +556,35 @@ int read_all_rows(
     const TableSchema *schema,
     StorageRowList *out_row_list,
     char *error_buf,
-    size_t error_buf_size
-) {
+    size_t error_buf_size)
+{
     char path[256];
     char line[MAX_LINE_LENGTH + 1];
     FILE *file = NULL;
 
     init_row_list(out_row_list);
 
-    if (table_name == NULL || schema == NULL || out_row_list == NULL) {
+    if (table_name == NULL || schema == NULL || out_row_list == NULL)
+    {
         set_error(error_buf, error_buf_size, "read_all_rows: 잘못된 인자입니다");
         return -1;
     }
 
-    if (ensure_data_directory_exists(error_buf, error_buf_size) != 0) {
+    if (ensure_data_directory_exists(error_buf, error_buf_size) != 0)
+    {
         return -1;
     }
 
-    if (build_data_path(table_name, path, sizeof(path), error_buf, error_buf_size) != 0) {
+    if (build_data_path(table_name, path, sizeof(path), error_buf, error_buf_size) != 0)
+    {
         return -1;
     }
 
     file = fopen(path, "r");
-    if (file == NULL) {
-        if (errno == ENOENT) {
+    if (file == NULL)
+    {
+        if (errno == ENOENT)
+        {
             /*
              * CSV 파일이 아직 없다는 것은 "데이터가 한 줄도 없는 테이블"로 해석한다.
              * 이 경우 오류로 보지 않고 빈 결과를 그대로 반환한다.
@@ -537,51 +597,54 @@ int read_all_rows(
             error_buf_size,
             "read_all_rows: 데이터 파일 '%s'을(를) 열 수 없습니다: %s",
             path,
-            strerror(errno)
-        );
+            strerror(errno));
         return -1;
     }
 
-    while (fgets(line, sizeof(line), file) != NULL) {
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
         StorageRow row;
 
-        if (strchr(line, '\n') == NULL && !feof(file)) {
+        if (strchr(line, '\n') == NULL && !feof(file))
+        {
             set_errorf(
                 error_buf,
                 error_buf_size,
                 "read_all_rows: 데이터 파일 '%s'에 MAX_LINE_LENGTH를 넘는 줄이 있습니다",
-                path
-            );
+                path);
             fclose(file);
             free_storage_row_list(out_row_list);
             return -1;
         }
 
         strip_line_endings(line);
-        if (line[0] == '\0') {
+        if (line[0] == '\0')
+        {
             continue;
         }
 
-        if (parse_csv_line_to_row(line, schema, &row, error_buf, error_buf_size) != 0) {
+        if (parse_csv_line_to_row(line, schema, &row, error_buf, error_buf_size) != 0)
+        {
             fclose(file);
             free_storage_row_list(out_row_list);
             return -1;
         }
 
-        if (append_row_to_list(out_row_list, &row, error_buf, error_buf_size) != 0) {
+        if (append_row_to_list(out_row_list, &row, error_buf, error_buf_size) != 0)
+        {
             fclose(file);
             free_storage_row_list(out_row_list);
             return -1;
         }
     }
 
-    if (ferror(file)) {
+    if (ferror(file))
+    {
         set_errorf(
             error_buf,
             error_buf_size,
             "read_all_rows: 데이터 파일 '%s'을(를) 읽는 중 오류가 발생했습니다",
-            path
-        );
+            path);
         fclose(file);
         free_storage_row_list(out_row_list);
         return -1;
@@ -591,8 +654,10 @@ int read_all_rows(
     return 0;
 }
 
-void free_storage_row_list(StorageRowList *row_list) {
-    if (row_list == NULL) {
+void free_storage_row_list(StorageRowList *row_list)
+{
+    if (row_list == NULL)
+    {
         return;
     }
 
