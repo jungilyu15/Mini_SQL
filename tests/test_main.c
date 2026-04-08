@@ -56,6 +56,10 @@ static int cleanup_generated_main_files(void)
     {
         return -1;
     }
+    if (remove_if_exists("stdin_capture.txt") != 0)
+    {
+        return -1;
+    }
 
     return 0;
 }
@@ -88,20 +92,45 @@ static int read_file_to_buffer(const char *path, char *buffer, size_t buffer_siz
  * stdout / stderr를 임시 파일로 바꿔 놓고 mini_sql_program_main을 실행한다.
  * CLI 통합 테스트에서 실제 사용자 출력 문자열을 검증할 때 사용한다.
  */
-static int run_main_and_capture(
+static int run_main_with_input_and_capture(
     int argc,
     char **argv,
+    const char *stdin_text,
     char *stdout_buffer,
     size_t stdout_buffer_size,
     char *stderr_buffer,
     size_t stderr_buffer_size
 )
 {
+    int saved_stdin = -1;
     int saved_stdout = -1;
     int saved_stderr = -1;
+    FILE *stdin_file = NULL;
     FILE *stdout_file = NULL;
     FILE *stderr_file = NULL;
     int result = 0;
+
+    if (stdin_text != NULL)
+    {
+        stdin_file = fopen("stdin_capture.txt", "w");
+        if (stdin_file == NULL)
+        {
+            return -999;
+        }
+
+        if (fputs(stdin_text, stdin_file) == EOF)
+        {
+            fclose(stdin_file);
+            return -999;
+        }
+
+        fclose(stdin_file);
+        stdin_file = fopen("stdin_capture.txt", "r");
+        if (stdin_file == NULL)
+        {
+            return -999;
+        }
+    }
 
     fflush(stdout);
     fflush(stderr);
@@ -118,46 +147,74 @@ static int run_main_and_capture(
         {
             fclose(stderr_file);
         }
+        if (stdin_file != NULL)
+        {
+            fclose(stdin_file);
+        }
         return -999;
     }
 
+    saved_stdin = dup(fileno(stdin));
     saved_stdout = dup(fileno(stdout));
     saved_stderr = dup(fileno(stderr));
-    if (saved_stdout < 0 || saved_stderr < 0)
+    if (saved_stdin < 0 || saved_stdout < 0 || saved_stderr < 0)
     {
         fclose(stdout_file);
         fclose(stderr_file);
+        if (stdin_file != NULL)
+        {
+            fclose(stdin_file);
+        }
         return -999;
     }
 
-    if (dup2(fileno(stdout_file), fileno(stdout)) < 0 ||
+    if ((stdin_file != NULL && dup2(fileno(stdin_file), fileno(stdin)) < 0) ||
+        dup2(fileno(stdout_file), fileno(stdout)) < 0 ||
         dup2(fileno(stderr_file), fileno(stderr)) < 0)
     {
         fclose(stdout_file);
         fclose(stderr_file);
+        if (stdin_file != NULL)
+        {
+            fclose(stdin_file);
+        }
+        close(saved_stdin);
         close(saved_stdout);
         close(saved_stderr);
         return -999;
     }
 
+    if (stdin_file != NULL)
+    {
+        fclose(stdin_file);
+    }
     fclose(stdout_file);
     fclose(stderr_file);
+    clearerr(stdin);
+    clearerr(stdout);
+    clearerr(stderr);
 
     result = mini_sql_program_main(argc, argv);
 
     fflush(stdout);
     fflush(stderr);
 
-    if (dup2(saved_stdout, fileno(stdout)) < 0 ||
+    if (dup2(saved_stdin, fileno(stdin)) < 0 ||
+        dup2(saved_stdout, fileno(stdout)) < 0 ||
         dup2(saved_stderr, fileno(stderr)) < 0)
     {
+        close(saved_stdin);
         close(saved_stdout);
         close(saved_stderr);
         return -999;
     }
 
+    close(saved_stdin);
     close(saved_stdout);
     close(saved_stderr);
+    clearerr(stdin);
+    clearerr(stdout);
+    clearerr(stderr);
 
     if (stdout_buffer != NULL && stdout_buffer_size > 0)
     {
@@ -176,6 +233,26 @@ static int run_main_and_capture(
     }
 
     return result;
+}
+
+/* 기존 파일 실행 테스트는 stdin 없이 실행하므로 wrapper로 감싼다. */
+static int run_main_and_capture(
+    int argc,
+    char **argv,
+    char *stdout_buffer,
+    size_t stdout_buffer_size,
+    char *stderr_buffer,
+    size_t stderr_buffer_size
+)
+{
+    return run_main_with_input_and_capture(
+        argc,
+        argv,
+        NULL,
+        stdout_buffer,
+        stdout_buffer_size,
+        stderr_buffer,
+        stderr_buffer_size);
 }
 
 /* split_sql_statements가 기본적인 세미콜론 분리를 수행하는지 확인한다. */
@@ -267,16 +344,46 @@ static int test_split_sql_statements_unterminated_quote(void)
     return strstr(error_buf, "작은따옴표") == NULL;
 }
 
-/* 인자가 없으면 사용법을 출력하고 non-zero로 종료해야 한다. */
-static int test_main_usage_without_argument(void)
+/* 인자 없이 실행하면 REPL 모드로 진입하고 EOF에서 정상 종료해야 한다. */
+static int test_main_enters_repl_without_argument(void)
 {
     char stdout_buffer[512];
     char stderr_buffer[512];
     char *argv[] = {(char *)"mini_sql"};
     int exit_code = 0;
 
-    exit_code = run_main_and_capture(
+    exit_code = run_main_with_input_and_capture(
         1,
+        argv,
+        "",
+        stdout_buffer,
+        sizeof(stdout_buffer),
+        stderr_buffer,
+        sizeof(stderr_buffer));
+
+    if (exit_code != 0)
+    {
+        return 1;
+    }
+
+    if (strstr(stdout_buffer, "Mini_SQL REPL") == NULL)
+    {
+        return 1;
+    }
+
+    return strstr(stdout_buffer, "mini_sql> ") == NULL;
+}
+
+/* 파일 인자가 두 개 이상이면 사용법을 출력하고 종료해야 한다. */
+static int test_main_usage_with_too_many_arguments(void)
+{
+    char stdout_buffer[512];
+    char stderr_buffer[512];
+    char *argv[] = {(char *)"mini_sql", (char *)"a.sql", (char *)"b.sql"};
+    int exit_code = 0;
+
+    exit_code = run_main_and_capture(
+        3,
         argv,
         stdout_buffer,
         sizeof(stdout_buffer),
@@ -546,6 +653,113 @@ static int test_main_runs_select_where_named_columns_file(void)
     return 0;
 }
 
+/* REPL에서는 세미콜론 없이도 기존 parser 정책대로 한 줄 SQL을 실행할 수 있어야 한다. */
+static int test_main_repl_runs_insert_and_select_sequence(void)
+{
+    char stdout_buffer[4096];
+    char stderr_buffer[1024];
+    char file_buffer[512];
+    char *argv[] = {(char *)"mini_sql"};
+    int exit_code = 0;
+
+    if (remove_if_exists("data/main_cli.csv") != 0)
+    {
+        return 1;
+    }
+
+    exit_code = run_main_with_input_and_capture(
+        1,
+        argv,
+        "\nINSERT INTO main_cli VALUES (3, 'choi', 40)\nSELECT name, age FROM main_cli WHERE id = 3\nquit\n",
+        stdout_buffer,
+        sizeof(stdout_buffer),
+        stderr_buffer,
+        sizeof(stderr_buffer));
+
+    if (exit_code != 0)
+    {
+        fprintf(stderr, "%s\n", stderr_buffer);
+        return 1;
+    }
+
+    if (strstr(stdout_buffer, "Mini_SQL REPL") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "choi") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "(1 rows)") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stderr_buffer, "repl failed") != NULL)
+    {
+        return 1;
+    }
+
+    if (read_file_to_buffer("data/main_cli.csv", file_buffer, sizeof(file_buffer)) != 0)
+    {
+        return 1;
+    }
+
+    if (strcmp(file_buffer, "3,choi,40\n") != 0)
+    {
+        return 1;
+    }
+
+    if (remove_if_exists("data/main_cli.csv") != 0)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* REPL에서는 오류가 나도 종료하지 않고 다음 입력을 계속 받아야 한다. */
+static int test_main_repl_continues_after_error(void)
+{
+    char stdout_buffer[4096];
+    char stderr_buffer[2048];
+    char *argv[] = {(char *)"mini_sql"};
+    int exit_code = 0;
+
+    exit_code = run_main_with_input_and_capture(
+        1,
+        argv,
+        "SELECT nope FROM main_select_only\nSELECT name FROM main_select_only WHERE id = 10\nexit\n",
+        stdout_buffer,
+        sizeof(stdout_buffer),
+        stderr_buffer,
+        sizeof(stderr_buffer));
+
+    if (exit_code != 0)
+    {
+        fprintf(stderr, "%s\n", stderr_buffer);
+        return 1;
+    }
+
+    if (strstr(stderr_buffer, "repl failed: execute failed") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stderr_buffer, "존재하지 않는 컬럼") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "Han") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "(1 rows)") == NULL)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 /* 파일 안의 빈 문장들은 무시하고 나머지 SQL만 순서대로 실행해야 한다. */
 static int test_main_ignores_empty_statements(void)
 {
@@ -752,7 +966,8 @@ int main(void)
     failures += run_test(
         "split sql statements unterminated quote",
         test_split_sql_statements_unterminated_quote);
-    failures += run_test("main usage without argument", test_main_usage_without_argument);
+    failures += run_test("main enters repl without argument", test_main_enters_repl_without_argument);
+    failures += run_test("main usage with too many arguments", test_main_usage_with_too_many_arguments);
     failures += run_test("main missing sql file", test_main_missing_sql_file);
     failures += run_test("main runs basic sql file", test_main_runs_basic_sql_file);
     failures += run_test("main runs select only file", test_main_runs_select_only_file);
@@ -761,6 +976,10 @@ int main(void)
     failures += run_test(
         "main runs select where named columns file",
         test_main_runs_select_where_named_columns_file);
+    failures += run_test(
+        "main repl runs insert and select sequence",
+        test_main_repl_runs_insert_and_select_sequence);
+    failures += run_test("main repl continues after error", test_main_repl_continues_after_error);
     failures += run_test("main ignores empty statements", test_main_ignores_empty_statements);
     failures += run_test("main reports parse statement index", test_main_reports_parse_statement_index);
     failures += run_test("main reports execute statement index", test_main_reports_execute_statement_index);

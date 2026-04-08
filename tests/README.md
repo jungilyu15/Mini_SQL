@@ -63,7 +63,7 @@ Run the main CLI integration test:
 ```
 
 The main test covers SQL file reading, statement splitting, empty statement skipping,
-and end-to-end INSERT/SELECT execution through the CLI entrypoint.
+REPL mode, and end-to-end INSERT/SELECT execution through the CLI entrypoint.
 
 Build the storage unit test:
 
@@ -82,7 +82,8 @@ cleans up the CSV files it creates during the run.
 
 ## 기능 테스트 시나리오
 
-- 인자 없이 실행했을 때 usage 출력
+- 인자 없이 실행했을 때 REPL 진입
+- 인자가 너무 많을 때 usage 출력
 - 없는 SQL 파일 경로 입력 시 명확한 오류 출력
 - SQL 파일 안의 여러 문장을 세미콜론 기준으로 순차 실행
 - 빈 문장 무시
@@ -90,6 +91,8 @@ cleans up the CSV files it creates during the run.
 - `SELECT *` 실행 후 표 형태 출력
 - 특정 컬럼 SELECT 실행 후 요청한 컬럼만 출력
 - 단일 WHERE SELECT 실행 후 조건에 맞는 row만 출력
+- REPL에서 세미콜론 없는 한 줄 SQL 실행
+- REPL에서 오류가 나도 다음 입력 계속 처리
 - parse 실패 시 몇 번째 문장에서 실패했는지 보고
 - execute 실패 시 몇 번째 문장에서 실패했는지 보고
 
@@ -119,7 +122,7 @@ Current smoke scenarios for the app:
 
 Expected current behavior:
 
-- no-argument run prints usage and exits non-zero
+- no-argument run enters REPL and exits 0 on EOF or quit/exit
 - missing sql-file path prints a clear file read error and exits non-zero
 - valid sql-file input is split into statements and executed in order
 - SELECT 결과는 표 형태로 콘솔에 출력된다

@@ -17,7 +17,23 @@ typedef struct {
 /* 사용법을 한 줄로 안내한다. */
 static void print_usage(const char *program_name)
 {
-    fprintf(stderr, "Usage: %s <sql-file>\n", program_name);
+    fprintf(stderr, "Usage: %s [sql-file]\n", program_name);
+}
+
+/* REPL 진입 시 간단한 안내 문구를 출력한다. */
+static void print_repl_help(FILE *out_stream)
+{
+    fprintf(out_stream, "Mini_SQL REPL\n");
+    fprintf(out_stream, "- 한 줄에 SQL 한 문장만 입력할 수 있습니다\n");
+    fprintf(out_stream, "- 세미콜론은 있어도 되고 없어도 됩니다\n");
+    fprintf(out_stream, "- exit 또는 quit 를 입력하면 종료합니다\n");
+}
+
+/* REPL 프롬프트를 출력하고 즉시 flush한다. */
+static void print_repl_prompt(FILE *out_stream)
+{
+    fprintf(out_stream, "mini_sql> ");
+    fflush(out_stream);
 }
 
 /*
@@ -48,6 +64,28 @@ static void trim_range(const char **start, const char **end)
            ((*(*end - 1) == ' ') || (*(*end - 1) == '\t') || (*(*end - 1) == '\n') || (*(*end - 1) == '\r')))
     {
         (*end)--;
+    }
+}
+
+/*
+ * 한 줄 문자열 끝의 개행 문자를 제거한다.
+ * REPL은 fgets로 한 줄씩 읽기 때문에 입력 마지막의 \n, \r을 먼저 정리해 두면
+ * 이후 빈 문자열 판정과 exit/quit 비교가 단순해진다.
+ */
+static void trim_line_ending(char *text)
+{
+    size_t length = 0;
+
+    if (text == NULL)
+    {
+        return;
+    }
+
+    length = strlen(text);
+    while (length > 0 && (text[length - 1] == '\n' || text[length - 1] == '\r'))
+    {
+        text[length - 1] = '\0';
+        length--;
     }
 }
 
@@ -424,9 +462,59 @@ static int print_select_result(
 }
 
 /*
+ * SQL 문장 하나를 실행한다.
+ * 파일 모드와 REPL 모드가 모두 같은 parse -> execute -> 출력 흐름을 재사용할 수 있도록 분리한다.
+ */
+static int run_statement(
+    const char *statement,
+    FILE *out_stream,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    Command command;
+    ExecutionResult result;
+
+    if (statement == NULL || out_stream == NULL)
+    {
+        set_error(error_buf, error_buf_size, "main: 단일 SQL 실행 인자가 올바르지 않습니다");
+        return -1;
+    }
+
+    if (parse_sql(statement, &command, error_buf, error_buf_size) != 0)
+    {
+        char parse_error[MAX_ERROR_LENGTH];
+
+        snprintf(parse_error, sizeof(parse_error), "%s", error_buf);
+        snprintf(error_buf, error_buf_size, "parse failed: %s", parse_error);
+        return -1;
+    }
+
+    if (execute_command(&command, &result, error_buf, error_buf_size) != 0)
+    {
+        char execute_error[MAX_ERROR_LENGTH];
+
+        snprintf(execute_error, sizeof(execute_error), "%s", error_buf);
+        snprintf(error_buf, error_buf_size, "execute failed: %s", execute_error);
+        return -1;
+    }
+
+    if (result.has_rows)
+    {
+        if (print_select_result(&result, out_stream, error_buf, error_buf_size) != 0)
+        {
+            free_execution_result(&result);
+            return -1;
+        }
+    }
+
+    free_execution_result(&result);
+    return 0;
+}
+
+/*
  * SQL 문장 목록을 순서대로 실행한다.
- * 각 문장은 parse_sql -> execute_command 순서로 흘러가며,
- * SELECT 결과만 콘솔에 표 형태로 출력한다.
+ * 각 문장은 run_statement()를 통해 같은 실행 흐름을 재사용한다.
  */
 static int run_sql_file(
     const SqlStatementList *statements,
@@ -436,6 +524,7 @@ static int run_sql_file(
 )
 {
     size_t i = 0;
+    char statement_error[MAX_ERROR_LENGTH];
 
     if (statements == NULL || out_stream == NULL)
     {
@@ -445,44 +534,92 @@ static int run_sql_file(
 
     for (i = 0; i < statements->count; i++)
     {
-        Command command;
-        ExecutionResult result;
-        char statement_error[MAX_ERROR_LENGTH];
-
-        if (parse_sql(statements->items[i], &command, statement_error, sizeof(statement_error)) != 0)
+        if (run_statement(statements->items[i], out_stream, statement_error, sizeof(statement_error)) != 0)
         {
             snprintf(
                 error_buf,
                 error_buf_size,
-                "statement %zu parse failed: %s",
+                "statement %zu %s",
                 i + 1,
                 statement_error
             );
             return -1;
         }
+    }
 
-        if (execute_command(&command, &result, statement_error, sizeof(statement_error)) != 0)
+    return 0;
+}
+
+/*
+ * REPL 모드는 한 줄을 하나의 SQL 문장으로 간주한다.
+ * 멀티라인 SQL이나 한 줄 안의 여러 문장 분리는 지원하지 않는다.
+ *
+ * 정책:
+ * - 세미콜론은 parser 정책을 그대로 따라 선택적으로 허용한다
+ * - 빈 입력은 무시한다
+ * - parse/execute 오류가 나도 종료하지 않고 다음 입력을 계속 받는다
+ * - EOF(Ctrl-D) 또는 exit/quit 입력 시 정상 종료한다
+ */
+static int run_repl(FILE *in_stream, FILE *out_stream, FILE *error_stream)
+{
+    char line_buffer[MAX_SQL_TEXT_LENGTH];
+    char error_buf[MAX_ERROR_LENGTH];
+
+    if (in_stream == NULL || out_stream == NULL || error_stream == NULL)
+    {
+        return -1;
+    }
+
+    print_repl_help(out_stream);
+
+    while (1)
+    {
+        const char *trimmed_start = NULL;
+        const char *trimmed_end = NULL;
+        size_t trimmed_length = 0;
+
+        print_repl_prompt(out_stream);
+        if (fgets(line_buffer, sizeof(line_buffer), in_stream) == NULL)
         {
-            snprintf(
-                error_buf,
-                error_buf_size,
-                "statement %zu execute failed: %s",
-                i + 1,
-                statement_error
-            );
-            return -1;
+            fprintf(out_stream, "\n");
+            break;
         }
 
-        if (result.has_rows)
+        trim_line_ending(line_buffer);
+
+        trimmed_start = line_buffer;
+        trimmed_end = line_buffer + strlen(line_buffer);
+        trim_range(&trimmed_start, &trimmed_end);
+        trimmed_length = (size_t)(trimmed_end - trimmed_start);
+
+        if (trimmed_length == 0)
         {
-            if (print_select_result(&result, out_stream, error_buf, error_buf_size) != 0)
+            continue;
+        }
+
+        if ((trimmed_length == 4 && strncmp(trimmed_start, "exit", 4) == 0) ||
+            (trimmed_length == 4 && strncmp(trimmed_start, "quit", 4) == 0))
+        {
+            break;
+        }
+
+        {
+            char statement_buffer[MAX_SQL_TEXT_LENGTH];
+
+            if (trimmed_length >= sizeof(statement_buffer))
             {
-                free_execution_result(&result);
-                return -1;
+                fprintf(error_stream, "repl failed: 입력 SQL 길이가 너무 깁니다\n");
+                continue;
+            }
+
+            memcpy(statement_buffer, trimmed_start, trimmed_length);
+            statement_buffer[trimmed_length] = '\0';
+
+            if (run_statement(statement_buffer, out_stream, error_buf, sizeof(error_buf)) != 0)
+            {
+                fprintf(error_stream, "repl failed: %s\n", error_buf);
             }
         }
-
-        free_execution_result(&result);
     }
 
     return 0;
@@ -496,6 +633,11 @@ int main(int argc, char **argv)
 
     statements.count = 0;
     statements.items = NULL;
+
+    if (argc == 1)
+    {
+        return run_repl(stdin, stdout, stderr) != 0;
+    }
 
     if (argc != 2)
     {
