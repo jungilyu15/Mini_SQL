@@ -3,13 +3,13 @@
 Build the app:
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic main.c parser.c executor.c schema_manager.c storage.c -o mini_sql
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude src/main.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o mini_sql
 ```
 
 Build the schema manager unit test:
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic -I. tests/test_schema_manager.c schema_manager.c -o tests/test_schema_manager
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_schema_manager.c src/schema_manager.c -o tests/test_schema_manager
 ```
 
 Run the schema manager unit test:
@@ -23,7 +23,7 @@ The schema manager test covers schema loading, command model shape checks,
 Build the parser unit test:
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic -I. tests/test_parser.c parser.c -o tests/test_parser
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_parser.c src/parser.c -o tests/test_parser
 ```
 
 Run the parser unit test:
@@ -38,7 +38,7 @@ explicit column SELECT parsing, and the minimal single-condition SELECT WHERE pa
 Build the executor unit test:
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic -I. tests/test_executor.c executor.c schema_manager.c storage.c -o tests/test_executor
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_executor.c src/executor.c src/schema_manager.c src/storage.c -o tests/test_executor
 ```
 
 Run the executor unit test:
@@ -53,7 +53,7 @@ and single-condition SELECT WHERE filtering.
 Build the main CLI integration test:
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic -I. tests/test_main.c parser.c executor.c schema_manager.c storage.c -o tests/test_main
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_main.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o tests/test_main
 ```
 
 Run the main CLI integration test:
@@ -68,7 +68,7 @@ REPL mode, and end-to-end INSERT/SELECT execution through the CLI entrypoint.
 Build the storage unit test:
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic -I. tests/test_storage.c storage.c schema_manager.c -o tests/test_storage
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude tests/test_storage.c src/storage.c src/schema_manager.c -o tests/test_storage
 ```
 
 Run the storage unit test:

@@ -5,6 +5,15 @@ SQL 파일을 입력으로 받아 `INSERT`와 `SELECT`를 순차 실행하거나
 
 현재 목표는 학습용 MVP입니다. 데이터베이스 서버를 띄우지 않고도 SQL 흐름을 끝까지 확인할 수 있도록 단순하고 읽기 쉬운 구조를 유지합니다.
 
+## 폴더 구조
+
+- `src/`: C 구현 파일
+- `include/`: 공개 헤더 파일
+- `schema/`: 테이블 schema 파일
+- `data/`: CSV 데이터 파일
+- `sample/`: 예제 SQL 파일
+- `tests/`: 단위 테스트와 fixture
+
 ## 프로젝트 소개
 
 - 구현 언어: C11
@@ -90,7 +99,7 @@ age:int
 ### 1. 빌드
 
 ```sh
-cc -std=c11 -Wall -Wextra -pedantic main.c parser.c executor.c schema_manager.c storage.c -o mini_sql
+cc -std=c11 -Wall -Wextra -pedantic -Iinclude src/main.c src/parser.c src/executor.c src/schema_manager.c src/storage.c -o mini_sql
 ```
 
 ### 2. 실행
