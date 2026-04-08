@@ -21,6 +21,20 @@ Run the schema manager unit test:
 The schema manager test covers schema loading, command model shape checks,
 `validate_values`, and `cast_value`.
 
+Build the parser unit test:
+
+```sh
+cc -std=c11 -Wall -Wextra -pedantic -I. tests/test_parser.c parser.c -o tests/test_parser
+```
+
+Run the parser unit test:
+
+```sh
+./tests/test_parser
+```
+
+The parser test currently covers INSERT parsing only.
+
 Build the storage unit test:
 
 ```sh
