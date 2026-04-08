@@ -166,6 +166,46 @@ static int parse_select_columns(
 }
 
 /*
+ * 시작/끝 포인터로 지정된 토큰 구간을 그대로 복사한다.
+ * WHERE 조건 값처럼 공백 trim보다 "정확히 이 토큰을 보관"하는 쪽이 중요한 경우에 사용한다.
+ */
+static int copy_token_range(
+    const char *start,
+    const char *end,
+    char *out_token,
+    size_t out_token_size,
+    char *error_buf,
+    size_t error_buf_size,
+    const char *context_name
+)
+{
+    size_t token_length = 0;
+
+    if (start == NULL || end == NULL || out_token == NULL || out_token_size == 0)
+    {
+        set_error(error_buf, error_buf_size, "parser: 잘못된 token 복사 인자입니다");
+        return -1;
+    }
+
+    token_length = (size_t)(end - start);
+    if (token_length == 0)
+    {
+        snprintf(error_buf, error_buf_size, "%s: WHERE 값이 비어 있습니다", context_name);
+        return -1;
+    }
+
+    if (token_length >= out_token_size)
+    {
+        snprintf(error_buf, error_buf_size, "%s: WHERE 값 token 길이가 너무 깁니다", context_name);
+        return -1;
+    }
+
+    memcpy(out_token, start, token_length);
+    out_token[token_length] = '\0';
+    return 0;
+}
+
+/*
  * 값 토큰 앞뒤의 공백을 제거해 복사한다.
  * 문자열 토큰은 작은따옴표까지 포함한 raw SQL token 형태를 그대로 유지한다.
  */
@@ -382,6 +422,138 @@ int parse_insert(
     return expect_end_or_semicolon(cursor, "parse_insert", error_buf, error_buf_size);
 }
 
+/*
+ * WHERE 절의 값 token 하나를 읽는다.
+ * 현재 단계에서는 숫자 같은 비인용 token 하나 또는 작은따옴표 문자열 하나만 지원한다.
+ *
+ * 이 함수를 별도로 두는 이유:
+ * - WHERE는 단일 "=" 조건 하나만 지원한다
+ * - AND/OR 같은 추가 조건은 token 뒤의 남은 텍스트로 남겨 parser가 즉시 거부하게 한다
+ */
+static int parse_where_value_token(
+    const char **cursor,
+    char *out_token,
+    size_t out_token_size,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    const char *sql = skip_spaces(*cursor);
+    const char *token_start = NULL;
+
+    if (*sql == '\0' || *sql == ';')
+    {
+        set_error(error_buf, error_buf_size, "parse_select: WHERE 값이 필요합니다");
+        return -1;
+    }
+
+    if (*sql == '\'')
+    {
+        token_start = sql;
+        sql++;
+
+        while (*sql != '\0' && *sql != '\'')
+        {
+            sql++;
+        }
+
+        if (*sql != '\'')
+        {
+            set_error(error_buf, error_buf_size, "parse_select: 닫히지 않은 작은따옴표 문자열이 있습니다");
+            return -1;
+        }
+
+        sql++;
+        if (copy_token_range(
+                token_start,
+                sql,
+                out_token,
+                out_token_size,
+                error_buf,
+                error_buf_size,
+                "parse_select") != 0)
+        {
+            return -1;
+        }
+
+        *cursor = sql;
+        return 0;
+    }
+
+    token_start = sql;
+    while (*sql != '\0' && *sql != ';' && !isspace((unsigned char)*sql))
+    {
+        sql++;
+    }
+
+    if (copy_token_range(
+            token_start,
+            sql,
+            out_token,
+            out_token_size,
+            error_buf,
+            error_buf_size,
+            "parse_select") != 0)
+    {
+        return -1;
+    }
+
+    *cursor = sql;
+    return 0;
+}
+
+/*
+ * SELECT의 optional WHERE 절을 읽는다.
+ * 현재 범위에서는 "WHERE <column> = <value>" 단일 조건만 허용한다.
+ */
+static int parse_select_where_clause(
+    const char **cursor,
+    SelectCommand *out_command,
+    char *error_buf,
+    size_t error_buf_size
+)
+{
+    const char *sql = skip_spaces(*cursor);
+    const char *where_cursor = sql;
+
+    out_command->where.has_where = false;
+
+    if (!match_keyword(&where_cursor, "WHERE"))
+    {
+        return 0;
+    }
+
+    out_command->where.has_where = true;
+    sql = skip_spaces(where_cursor);
+
+    if (!parse_identifier(&sql, out_command->where.column, sizeof(out_command->where.column)))
+    {
+        set_error(error_buf, error_buf_size, "parse_select: WHERE 뒤에 컬럼 이름이 필요합니다");
+        return -1;
+    }
+
+    sql = skip_spaces(sql);
+    if (*sql != '=')
+    {
+        set_error(error_buf, error_buf_size, "parse_select: WHERE는 '=' 비교만 지원합니다");
+        return -1;
+    }
+
+    sql++;
+    if (parse_where_value_token(
+            &sql,
+            out_command->where.value.raw,
+            sizeof(out_command->where.value.raw),
+            error_buf,
+            error_buf_size) != 0)
+    {
+        return -1;
+    }
+
+    *cursor = sql;
+    return 0;
+}
+
 int parse_select(
     const char *sql,
     SelectCommand *out_command,
@@ -422,6 +594,11 @@ int parse_select(
     if (!parse_identifier(&cursor, out_command->table_name, sizeof(out_command->table_name)))
     {
         set_error(error_buf, error_buf_size, "parse_select: FROM 뒤에 테이블 이름이 필요합니다");
+        return -1;
+    }
+
+    if (parse_select_where_clause(&cursor, out_command, error_buf, error_buf_size) != 0)
+    {
         return -1;
     }
 

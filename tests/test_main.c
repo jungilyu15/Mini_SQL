@@ -458,6 +458,94 @@ static int test_main_runs_select_named_columns_file(void)
     return 0;
 }
 
+/* SELECT * + WHERE는 조건에 맞는 row만 표 형태로 출력해야 한다. */
+static int test_main_runs_select_where_star_file(void)
+{
+    char stdout_buffer[4096];
+    char stderr_buffer[1024];
+    char *argv[] = {(char *)"mini_sql", (char *)"sql/main_select_where_star.sql"};
+    int exit_code = 0;
+
+    exit_code = run_main_and_capture(
+        2,
+        argv,
+        stdout_buffer,
+        sizeof(stdout_buffer),
+        stderr_buffer,
+        sizeof(stderr_buffer));
+
+    if (exit_code != 0)
+    {
+        fprintf(stderr, "%s\n", stderr_buffer);
+        return 1;
+    }
+
+    if (strstr(stdout_buffer, "| id") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "Han") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "Yoon") != NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "(1 rows)") == NULL)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* 명시적 컬럼 SELECT + WHERE는 필터링 후 projection 결과만 출력해야 한다. */
+static int test_main_runs_select_where_named_columns_file(void)
+{
+    char stdout_buffer[4096];
+    char stderr_buffer[1024];
+    char *argv[] = {(char *)"mini_sql", (char *)"sql/main_select_where_columns.sql"};
+    int exit_code = 0;
+
+    exit_code = run_main_and_capture(
+        2,
+        argv,
+        stdout_buffer,
+        sizeof(stdout_buffer),
+        stderr_buffer,
+        sizeof(stderr_buffer));
+
+    if (exit_code != 0)
+    {
+        fprintf(stderr, "%s\n", stderr_buffer);
+        return 1;
+    }
+
+    if (strstr(stdout_buffer, "| name") == NULL || strstr(stdout_buffer, "| age") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "| id") != NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "Yoon") == NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "Han") != NULL)
+    {
+        return 1;
+    }
+    if (strstr(stdout_buffer, "(1 rows)") == NULL)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 /* 파일 안의 빈 문장들은 무시하고 나머지 SQL만 순서대로 실행해야 한다. */
 static int test_main_ignores_empty_statements(void)
 {
@@ -606,6 +694,35 @@ static int test_main_reports_missing_select_column(void)
     return strstr(stderr_buffer, "존재하지 않는 컬럼") == NULL;
 }
 
+/* WHERE 컬럼이 없으면 execute 단계에서 문장 번호와 함께 실패해야 한다. */
+static int test_main_reports_missing_where_column(void)
+{
+    char stdout_buffer[1024];
+    char stderr_buffer[1024];
+    char *argv[] = {(char *)"mini_sql", (char *)"sql/main_select_where_missing_column.sql"};
+    int exit_code = 0;
+
+    exit_code = run_main_and_capture(
+        2,
+        argv,
+        stdout_buffer,
+        sizeof(stdout_buffer),
+        stderr_buffer,
+        sizeof(stderr_buffer));
+
+    if (exit_code == 0)
+    {
+        return 1;
+    }
+
+    if (strstr(stderr_buffer, "statement 1 execute failed") == NULL)
+    {
+        return 1;
+    }
+
+    return strstr(stderr_buffer, "WHERE 컬럼") == NULL;
+}
+
 int main(void)
 {
     char original_cwd[1024];
@@ -640,10 +757,15 @@ int main(void)
     failures += run_test("main runs basic sql file", test_main_runs_basic_sql_file);
     failures += run_test("main runs select only file", test_main_runs_select_only_file);
     failures += run_test("main runs select named columns file", test_main_runs_select_named_columns_file);
+    failures += run_test("main runs select where star file", test_main_runs_select_where_star_file);
+    failures += run_test(
+        "main runs select where named columns file",
+        test_main_runs_select_where_named_columns_file);
     failures += run_test("main ignores empty statements", test_main_ignores_empty_statements);
     failures += run_test("main reports parse statement index", test_main_reports_parse_statement_index);
     failures += run_test("main reports execute statement index", test_main_reports_execute_statement_index);
     failures += run_test("main reports missing select column", test_main_reports_missing_select_column);
+    failures += run_test("main reports missing where column", test_main_reports_missing_where_column);
 
     if (cleanup_generated_main_files() != 0)
     {

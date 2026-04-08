@@ -39,9 +39,9 @@ typedef struct {
  *   schema 로드 -> value 개수 검증 -> 타입 캐스팅 -> StorageRow 구성 -> append_row 호출
  *
  * - SELECT:
- *   schema 로드 -> read_all_rows 호출 -> 결과 row 목록 반환
+ *   schema 로드 -> read_all_rows 호출 -> WHERE 필터링(선택) -> projection(선택) -> 결과 row 목록 반환
  *
- * 현재 단계에서는 SELECT *만 지원한다.
+ * 현재 단계에서는 SELECT의 단일 WHERE "=" 조건 하나만 지원한다.
  */
 int execute_command(
     const Command *command,

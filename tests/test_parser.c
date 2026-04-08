@@ -305,13 +305,95 @@ static int test_parse_select_missing_from(void)
     return strstr(error_buf, "FROM") == NULL;
 }
 
-/* WHERE 같은 추가 절은 아직 지원하지 않으므로 실패해야 한다. */
-static int test_parse_select_where_not_supported(void)
+/* SELECT * 뒤에 단일 WHERE 조건 하나를 읽을 수 있어야 한다. */
+static int test_parse_select_where_star(void)
 {
     SelectCommand command;
     char error_buf[MAX_ERROR_LENGTH];
 
-    if (parse_select("SELECT * FROM users WHERE age = 10;", &command, error_buf, sizeof(error_buf)) == 0)
+    if (parse_select("SELECT * FROM users WHERE id = 1;", &command, error_buf, sizeof(error_buf)) != 0)
+    {
+        fprintf(stderr, "unexpected error: %s\n", error_buf);
+        return 1;
+    }
+
+    if (!command.select_all)
+    {
+        return 1;
+    }
+    if (!command.where.has_where)
+    {
+        return 1;
+    }
+    if (strcmp(command.where.column, "id") != 0)
+    {
+        return 1;
+    }
+    if (strcmp(command.where.value.raw, "1") != 0)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* 명시적 컬럼 SELECT에도 단일 WHERE 조건을 함께 붙일 수 있어야 한다. */
+static int test_parse_select_where_named_columns(void)
+{
+    SelectCommand command;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    if (parse_select("SELECT name, age FROM users WHERE name = 'kim';", &command, error_buf, sizeof(error_buf)) != 0)
+    {
+        fprintf(stderr, "unexpected error: %s\n", error_buf);
+        return 1;
+    }
+
+    if (command.select_all)
+    {
+        return 1;
+    }
+    if (command.column_count != 2)
+    {
+        return 1;
+    }
+    if (!command.where.has_where)
+    {
+        return 1;
+    }
+    if (strcmp(command.where.column, "name") != 0)
+    {
+        return 1;
+    }
+    if (strcmp(command.where.value.raw, "'kim'") != 0)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* WHERE는 "=" 하나만 지원하므로 다른 비교 연산자는 실패해야 한다. */
+static int test_parse_select_where_invalid_operator(void)
+{
+    SelectCommand command;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    if (parse_select("SELECT * FROM users WHERE age > 10;", &command, error_buf, sizeof(error_buf)) == 0)
+    {
+        return 1;
+    }
+
+    return strstr(error_buf, "=") == NULL;
+}
+
+/* WHERE 뒤에 AND 같은 추가 조건이 오면 최소 범위를 벗어나므로 실패해야 한다. */
+static int test_parse_select_where_extra_condition_not_supported(void)
+{
+    SelectCommand command;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    if (parse_select("SELECT * FROM users WHERE age = 10 AND id = 1;", &command, error_buf, sizeof(error_buf)) == 0)
     {
         return 1;
     }
@@ -412,6 +494,38 @@ static int test_parse_sql_named_select(void)
     return 0;
 }
 
+/* parse_sql도 WHERE가 포함된 SELECT를 정상 분기해야 한다. */
+static int test_parse_sql_select_with_where(void)
+{
+    Command command;
+    char error_buf[MAX_ERROR_LENGTH];
+
+    if (parse_sql("SELECT name, age FROM users WHERE name = 'kim';", &command, error_buf, sizeof(error_buf)) != 0)
+    {
+        fprintf(stderr, "unexpected error: %s\n", error_buf);
+        return 1;
+    }
+
+    if (command.type != CMD_SELECT)
+    {
+        return 1;
+    }
+    if (!command.as.select.where.has_where)
+    {
+        return 1;
+    }
+    if (strcmp(command.as.select.where.column, "name") != 0)
+    {
+        return 1;
+    }
+    if (strcmp(command.as.select.where.value.raw, "'kim'") != 0)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 int main(void)
 {
     int failures = 0;
@@ -429,10 +543,16 @@ int main(void)
     failures += run_test("parse select without semicolon", test_parse_select_without_semicolon);
     failures += run_test("parse select named columns", test_parse_select_named_columns);
     failures += run_test("parse select missing from", test_parse_select_missing_from);
-    failures += run_test("parse select where not supported", test_parse_select_where_not_supported);
+    failures += run_test("parse select where star", test_parse_select_where_star);
+    failures += run_test("parse select where named columns", test_parse_select_where_named_columns);
+    failures += run_test("parse select where invalid operator", test_parse_select_where_invalid_operator);
+    failures += run_test(
+        "parse select where extra condition not supported",
+        test_parse_select_where_extra_condition_not_supported);
     failures += run_test("parse select invalid column list", test_parse_select_invalid_column_list);
     failures += run_test("parse sql insert and select", test_parse_sql_insert_and_select);
     failures += run_test("parse sql named select", test_parse_sql_named_select);
+    failures += run_test("parse sql select with where", test_parse_sql_select_with_where);
 
     if (failures != 0)
     {

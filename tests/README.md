@@ -32,7 +32,8 @@ Run the parser unit test:
 ./tests/test_parser
 ```
 
-The parser test currently covers INSERT parsing, `SELECT * FROM <table>`, and explicit column SELECT parsing.
+The parser test currently covers INSERT parsing, `SELECT * FROM <table>`,
+explicit column SELECT parsing, and the minimal single-condition SELECT WHERE parsing.
 
 Build the executor unit test:
 
@@ -46,7 +47,8 @@ Run the executor unit test:
 ./tests/test_executor
 ```
 
-The executor test covers minimal INSERT/SELECT execution flow only.
+The executor test covers minimal INSERT/SELECT execution flow, explicit column projection,
+and single-condition SELECT WHERE filtering.
 
 Build the main CLI integration test:
 
@@ -87,6 +89,7 @@ cleans up the CSV files it creates during the run.
 - `INSERT` 문 실행 후 CSV 파일 생성 또는 append
 - `SELECT *` 실행 후 표 형태 출력
 - 특정 컬럼 SELECT 실행 후 요청한 컬럼만 출력
+- 단일 WHERE SELECT 실행 후 조건에 맞는 row만 출력
 - parse 실패 시 몇 번째 문장에서 실패했는지 보고
 - execute 실패 시 몇 번째 문장에서 실패했는지 보고
 
@@ -100,7 +103,8 @@ cleans up the CSV files it creates during the run.
 - CSV 필드 수 불일치
 - `MAX_LINE_LENGTH`를 넘는 CSV 줄 읽기 오류
 - 존재하지 않는 컬럼을 조회하면 execute 단계에서 오류 처리
-- `WHERE` 절 거부
+- 존재하지 않는 WHERE 컬럼을 조회하면 execute 단계에서 오류 처리
+- `AND` 같은 WHERE 추가 조건은 parse 단계에서 오류 처리
 
 Current smoke scenarios for the app:
 
@@ -110,6 +114,7 @@ Current smoke scenarios for the app:
 ./mini_sql sample/basic.sql
 ./mini_sql sample/insert_only.sql
 ./mini_sql sample/select_only.sql
+./mini_sql sample/select_where.sql
 ```
 
 Expected current behavior:
