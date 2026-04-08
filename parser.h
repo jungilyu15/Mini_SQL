@@ -25,8 +25,27 @@ int parse_insert(
 );
 
 /*
- * 현재 단계의 parse_sql은 INSERT만 지원한다.
- * INSERT가 아니면 아직 구현되지 않았다는 오류를 반환한다.
+ * SELECT * FROM <table> 문 하나를 파싱해 SelectCommand를 채운다.
+ *
+ * 지원 예:
+ *   SELECT * FROM users;
+ *
+ * 정책:
+ * - 키워드는 대소문자를 구분하지 않는다
+ * - 공백은 적당히 유연하게 허용한다
+ * - 마지막 세미콜론은 있어도 되고 없어도 된다
+ * - 현재 단계에서는 columns는 "*" 하나만 지원한다
+ */
+int parse_select(
+    const char *sql,
+    SelectCommand *out_command,
+    char *error_buf,
+    size_t error_buf_size
+);
+
+/*
+ * 현재 단계의 parse_sql은 INSERT와 SELECT *만 지원한다.
+ * 그 외 문장은 아직 구현되지 않았다는 오류를 반환한다.
  */
 int parse_sql(
     const char *sql,

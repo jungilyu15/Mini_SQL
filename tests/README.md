@@ -20,7 +20,6 @@ Run the schema manager unit test:
 
 The schema manager test covers schema loading, command model shape checks,
 `validate_values`, and `cast_value`.
-
 Build the parser unit test:
 
 ```sh
@@ -33,8 +32,7 @@ Run the parser unit test:
 ./tests/test_parser
 ```
 
-The parser test currently covers INSERT parsing only.
-
+The parser test currently covers INSERT parsing and `SELECT * FROM <table>` parsing only.
 Build the storage unit test:
 
 ```sh
